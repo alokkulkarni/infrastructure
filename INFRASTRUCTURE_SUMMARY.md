@@ -25,6 +25,59 @@ Both AWS and Azure infrastructures are configured with:
 | **State Backend** | S3 + DynamoDB | Azure Storage Account |
 | **Runner Setup** | GitHub Actions runner | GitHub Actions runner |
 | **Container Runtime** | Docker with Nginx | Docker with Nginx |
+| **Nginx Config** | ✅ **Automated** (label-based) | ✅ **Automated** (label-based) |
+
+## 🎯 Nginx Automation
+
+Both platforms include **automated Nginx configuration management** that eliminates manual configuration steps.
+
+### How It Works
+
+- **Event-Driven**: Watches Docker container lifecycle events
+- **Label-Based**: Extracts routing config from Docker labels
+- **Auto-Reload**: Automatically tests and reloads Nginx
+- **Self-Cleaning**: Removes configs when containers stop
+- **Zero-Config**: Just deploy containers with labels!
+
+### Quick Example
+
+```bash
+# Deploy container with labels
+docker run -d \
+  --name payment-api \
+  --network app-network \
+  --label nginx.path=/payments \
+  --label nginx.port=8080 \
+  payment-service:latest
+
+# ✨ Immediately accessible at http://HOST_IP/payments
+# No manual config files, no nginx reload needed!
+```
+
+### Supported Labels
+
+- `nginx.enable` - Enable/disable auto-config (default: true)
+- `nginx.path` - URL path prefix (default: /container-name)
+- `nginx.host` - Server name for host-based routing (optional)
+- `nginx.port` - Backend port (auto-detected if not specified)
+
+### Features
+
+✅ Zero manual configuration  
+✅ Real-time container monitoring  
+✅ Automatic config generation  
+✅ Automatic Nginx reload  
+✅ Automatic cleanup on container stop  
+✅ WebSocket support included  
+✅ Network isolation (app-network only)  
+✅ Comprehensive logging  
+
+### Documentation
+
+- **Quick Reference**: [NGINX_QUICK_REFERENCE.md](./NGINX_QUICK_REFERENCE.md)
+- **AWS Guide**: [AWS/NGINX_AUTO_CONFIG.md](./AWS/NGINX_AUTO_CONFIG.md)
+- **Azure Guide**: [Azure/NGINX_AUTO_CONFIG.md](./Azure/NGINX_AUTO_CONFIG.md)
+- **Implementation**: [NGINX_AUTOMATION_SUMMARY.md](./NGINX_AUTOMATION_SUMMARY.md)
 
 ## 📁 Directory Structure
 

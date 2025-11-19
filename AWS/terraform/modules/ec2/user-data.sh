@@ -226,6 +226,195 @@ server {
 }
 EOF
 
+# Create automated Nginx configuration management script
+echo "Creating automated Nginx configuration manager..."
+cat > /opt/nginx/auto-config.sh <<'AUTOCONFIG'
+#!/bin/bash
+# Automated Nginx Configuration Manager
+# This script watches Docker events and automatically generates Nginx configurations
+
+LOG_FILE="/var/log/nginx-auto-config.log"
+CONFIG_DIR="/opt/nginx/conf.d"
+GENERATED_DIR="$CONFIG_DIR/auto-generated"
+
+# Create directory for auto-generated configs
+mkdir -p $GENERATED_DIR
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
+}
+
+# Function to extract service metadata from container labels
+get_container_info() {
+    local container_id=$1
+    docker inspect $container_id --format '{{json .}}' 2>/dev/null
+}
+
+# Function to generate Nginx config for a container
+generate_config() {
+    local container_id=$1
+    local container_name=$(docker inspect --format='{{.Name}}' $container_id | sed 's/^\///')
+    local network=$(docker inspect --format='{{range $key, $value := .NetworkSettings.Networks}}{{$key}}{{end}}' $container_id)
+    
+    # Check if container is on app-network
+    if [ "$network" != "app-network" ]; then
+        log "Container $container_name is not on app-network, skipping"
+        return
+    fi
+    
+    # Get exposed port from container
+    local port=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}{{end}}' $container_id | cut -d'/' -f1 | head -n1)
+    
+    # Get labels for configuration
+    local nginx_enable=$(docker inspect --format='{{index .Config.Labels "nginx.enable"}}' $container_id)
+    local nginx_host=$(docker inspect --format='{{index .Config.Labels "nginx.host"}}' $container_id)
+    local nginx_path=$(docker inspect --format='{{index .Config.Labels "nginx.path"}}' $container_id)
+    local nginx_port=$(docker inspect --format='{{index .Config.Labels "nginx.port"}}' $container_id)
+    
+    # Use label port or detected port
+    if [ -n "$nginx_port" ] && [ "$nginx_port" != "<no value>" ]; then
+        port=$nginx_port
+    fi
+    
+    # Skip if nginx.enable is explicitly set to false
+    if [ "$nginx_enable" == "false" ]; then
+        log "Nginx disabled for $container_name via label"
+        return
+    fi
+    
+    # Default path if not specified
+    if [ -z "$nginx_path" ] || [ "$nginx_path" == "<no value>" ]; then
+        nginx_path="/$container_name"
+    fi
+    
+    local config_file="$GENERATED_DIR/${container_name}.conf"
+    
+    log "Generating Nginx config for container: $container_name (port: $port, path: $nginx_path)"
+    
+    # Generate configuration
+    cat > $config_file <<NGINXCONF
+# Auto-generated configuration for $container_name
+# Generated at: $(date)
+# Container ID: $container_id
+
+upstream ${container_name}_backend {
+    server ${container_name}:${port};
+}
+
+server {
+    listen 80;
+NGINXCONF
+
+    # Add server_name if specified
+    if [ -n "$nginx_host" ] && [ "$nginx_host" != "<no value>" ]; then
+        echo "    server_name $nginx_host;" >> $config_file
+    fi
+    
+    cat >> $config_file <<NGINXCONF
+    
+    location $nginx_path {
+        proxy_pass http://${container_name}_backend;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXCONF
+    
+    log "Configuration created: $config_file"
+    
+    # Reload Nginx
+    reload_nginx
+}
+
+# Function to remove config for a container
+remove_config() {
+    local container_name=$1
+    local config_file="$GENERATED_DIR/${container_name}.conf"
+    
+    if [ -f $config_file ]; then
+        log "Removing Nginx config for container: $container_name"
+        rm -f $config_file
+        reload_nginx
+    fi
+}
+
+# Function to reload Nginx
+reload_nginx() {
+    log "Reloading Nginx configuration..."
+    
+    # Test configuration first
+    if docker exec nginx nginx -t 2>&1 | tee -a $LOG_FILE; then
+        docker exec nginx nginx -s reload 2>&1 | tee -a $LOG_FILE
+        log "Nginx reloaded successfully"
+    else
+        log "ERROR: Nginx configuration test failed!"
+    fi
+}
+
+# Initialize - generate configs for existing containers
+log "Initializing: Scanning existing containers..."
+docker ps --filter "network=app-network" --format '{{.ID}}' | while read container_id; do
+    generate_config $container_id
+done
+
+# Watch Docker events
+log "Starting Docker events monitor..."
+docker events --filter 'type=container' --filter 'event=start' --filter 'event=die' --filter 'event=stop' --format '{{json .}}' | while read event; do
+    event_type=$(echo $event | jq -r '.status')
+    container_id=$(echo $event | jq -r '.id')
+    container_name=$(echo $event | jq -r '.Actor.Attributes.name')
+    
+    log "Docker event: $event_type for container $container_name ($container_id)"
+    
+    case $event_type in
+        start)
+            # Wait a moment for container to fully start
+            sleep 2
+            generate_config $container_id
+            ;;
+        die|stop)
+            remove_config $container_name
+            ;;
+    esac
+done
+AUTOCONFIG
+
+chmod +x /opt/nginx/auto-config.sh
+
+# Create systemd service for the auto-config script
+cat > /etc/systemd/system/nginx-auto-config.service <<'SYSTEMD'
+[Unit]
+Description=Nginx Auto Configuration Manager
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/nginx/auto-config.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/nginx-auto-config.log
+StandardError=append:/var/log/nginx-auto-config.log
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD
+
+log "Nginx automated configuration manager created"
+
 # Run Nginx as a Docker container
 echo "Starting Nginx container..."
 docker run -d \
@@ -254,6 +443,25 @@ fi
 echo "Nginx reverse proxy setup completed"
 echo "Configuration directory: /opt/nginx/conf.d/"
 echo "Add your service configurations to /opt/nginx/conf.d/ and reload with: docker exec nginx nginx -s reload"
+
+# Start Nginx auto-configuration service
+echo "Starting Nginx auto-configuration service..."
+systemctl daemon-reload
+systemctl enable nginx-auto-config.service
+systemctl start nginx-auto-config.service
+
+# Verify service is running
+if systemctl is-active --quiet nginx-auto-config.service; then
+    echo "Nginx auto-configuration service started successfully"
+    echo "The service will automatically create Nginx configs for containers with labels:"
+    echo "  - nginx.enable=true (default if not specified)"
+    echo "  - nginx.host=example.com (optional)"
+    echo "  - nginx.path=/myapp (optional, defaults to /container-name)"
+    echo "  - nginx.port=8080 (optional, auto-detected if not specified)"
+else
+    echo "WARNING: Nginx auto-configuration service failed to start"
+    systemctl status nginx-auto-config.service
+fi
 
 # Install AWS CLI
 echo "Installing AWS CLI..."
