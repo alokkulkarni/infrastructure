@@ -1,0 +1,144 @@
+#!/bin/bash
+# Script to set up S3 backend for Terraform state management
+# This creates the S3 bucket and DynamoDB table for state locking
+
+set -e
+
+# Configuration
+AWS_REGION="${AWS_REGION:-us-east-1}"
+BUCKET_NAME="${TERRAFORM_STATE_BUCKET:-testcontainers-terraform-state}"
+DYNAMODB_TABLE="${TERRAFORM_LOCK_TABLE:-testcontainers-terraform-locks}"
+
+echo "======================================"
+echo "Terraform Backend Setup"
+echo "======================================"
+echo "Region: $AWS_REGION"
+echo "S3 Bucket: $BUCKET_NAME"
+echo "DynamoDB Table: $DYNAMODB_TABLE"
+echo ""
+
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+    echo "Error: AWS CLI is not installed. Please install it first."
+    exit 1
+fi
+
+# Check AWS credentials
+echo "Checking AWS credentials..."
+if ! aws sts get-caller-identity &> /dev/null; then
+    echo "Error: AWS credentials not configured. Please configure AWS CLI."
+    exit 1
+fi
+
+echo "AWS credentials verified."
+echo ""
+
+# Create S3 bucket
+echo "Creating S3 bucket: $BUCKET_NAME"
+if aws s3 ls "s3://$BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
+    aws s3api create-bucket \
+        --bucket "$BUCKET_NAME" \
+        --region "$AWS_REGION" \
+        $([ "$AWS_REGION" != "us-east-1" ] && echo "--create-bucket-configuration LocationConstraint=$AWS_REGION")
+    
+    echo "S3 bucket created successfully."
+    
+    # Enable versioning
+    echo "Enabling versioning on S3 bucket..."
+    aws s3api put-bucket-versioning \
+        --bucket "$BUCKET_NAME" \
+        --versioning-configuration Status=Enabled \
+        --region "$AWS_REGION"
+    
+    # Enable encryption
+    echo "Enabling default encryption on S3 bucket..."
+    aws s3api put-bucket-encryption \
+        --bucket "$BUCKET_NAME" \
+        --server-side-encryption-configuration '{
+            "Rules": [{
+                "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "AES256"
+                }
+            }]
+        }' \
+        --region "$AWS_REGION"
+    
+    # Block public access
+    echo "Blocking public access to S3 bucket..."
+    aws s3api put-public-access-block \
+        --bucket "$BUCKET_NAME" \
+        --public-access-block-configuration \
+            "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
+        --region "$AWS_REGION"
+    
+    # Add bucket policy
+    echo "Adding bucket policy..."
+    aws s3api put-bucket-policy \
+        --bucket "$BUCKET_NAME" \
+        --policy "{
+            \"Version\": \"2012-10-17\",
+            \"Statement\": [
+                {
+                    \"Effect\": \"Deny\",
+                    \"Principal\": \"*\",
+                    \"Action\": \"s3:*\",
+                    \"Resource\": [
+                        \"arn:aws:s3:::$BUCKET_NAME/*\",
+                        \"arn:aws:s3:::$BUCKET_NAME\"
+                    ],
+                    \"Condition\": {
+                        \"Bool\": {
+                            \"aws:SecureTransport\": \"false\"
+                        }
+                    }
+                }
+            ]
+        }" \
+        --region "$AWS_REGION"
+    
+    echo "S3 bucket configuration completed."
+else
+    echo "S3 bucket already exists."
+fi
+
+echo ""
+
+# Create DynamoDB table for state locking
+echo "Creating DynamoDB table: $DYNAMODB_TABLE"
+if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_REGION" &> /dev/null; then
+    aws dynamodb create-table \
+        --table-name "$DYNAMODB_TABLE" \
+        --attribute-definitions AttributeName=LockID,AttributeType=S \
+        --key-schema AttributeName=LockID,KeyType=HASH \
+        --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+        --tags Key=Purpose,Value=TerraformStateLocking \
+        --region "$AWS_REGION"
+    
+    echo "Waiting for DynamoDB table to be active..."
+    aws dynamodb wait table-exists \
+        --table-name "$DYNAMODB_TABLE" \
+        --region "$AWS_REGION"
+    
+    echo "DynamoDB table created successfully."
+else
+    echo "DynamoDB table already exists."
+fi
+
+echo ""
+echo "======================================"
+echo "Backend setup completed successfully!"
+echo "======================================"
+echo ""
+echo "Your backend configuration:"
+echo ""
+echo "terraform {"
+echo "  backend \"s3\" {"
+echo "    bucket         = \"$BUCKET_NAME\""
+echo "    key            = \"aws/ec2-runner/terraform.tfstate\""
+echo "    region         = \"$AWS_REGION\""
+echo "    encrypt        = true"
+echo "    dynamodb_table = \"$DYNAMODB_TABLE\""
+echo "  }"
+echo "}"
+echo ""
+echo "You can now initialize Terraform with: terraform init"

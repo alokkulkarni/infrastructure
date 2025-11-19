@@ -1,0 +1,167 @@
+name: Destroy AWS Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      aws_region:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
+        type: string
+      confirm_destroy:
+        description: 'Type "destroy" to confirm'
+        required: true
+        type: string
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+jobs:
+  validate-confirmation:
+    name: Validate Destroy Confirmation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "destroy" ]; then
+            echo "::error::Destroy confirmation failed. You must type 'destroy' to proceed."
+            exit 1
+          fi
+          echo "Destroy confirmation validated."
+
+  terraform-destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: validate-confirmation
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: ${{ github.event.inputs.environment }}-destroy
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create terraform.tfvars
+        working-directory: infrastructure/AWS/terraform
+        run: |
+          cat > terraform.tfvars <<EOF
+          aws_region        = "${{ env.AWS_REGION }}"
+          project_name      = "testcontainers"
+          environment       = "${{ env.ENVIRONMENT }}"
+          availability_zone = "${{ env.AWS_REGION }}a"
+          
+          vpc_cidr            = "10.0.0.0/16"
+          public_subnet_cidr  = "10.0.1.0/24"
+          private_subnet_cidr = "10.0.2.0/24"
+          
+          instance_type = "t3.medium"
+          key_name      = "${{ secrets.EC2_KEY_NAME }}"
+          
+          allowed_ssh_cidr = ["${{ secrets.ALLOWED_SSH_CIDR }}"]
+          
+          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
+          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          EOF
+
+      - name: Update backend configuration
+        working-directory: infrastructure/AWS/terraform
+        run: |
+          cat > backend.tf <<EOF
+          terraform {
+            backend "s3" {
+              bucket         = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              region         = "${{ env.AWS_REGION }}"
+              encrypt        = true
+              dynamodb_table = "${{ secrets.TERRAFORM_LOCK_TABLE }}"
+            }
+          }
+          EOF
+
+      - name: Terraform Init
+        working-directory: infrastructure/AWS/terraform
+        run: terraform init
+
+      - name: Terraform Plan Destroy
+        working-directory: infrastructure/AWS/terraform
+        env:
+          TF_VAR_github_runner_token: "dummy-token-for-destroy"
+        run: |
+          terraform plan -destroy -out=destroy-plan -input=false
+
+      - name: Terraform Destroy
+        working-directory: infrastructure/AWS/terraform
+        env:
+          TF_VAR_github_runner_token: "dummy-token-for-destroy"
+        run: |
+          terraform destroy -auto-approve -input=false
+
+      - name: Verify Destruction
+        working-directory: infrastructure/AWS/terraform
+        run: |
+          echo "## Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "Region: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All resources have been successfully destroyed." >> $GITHUB_STEP_SUMMARY
+
+  cleanup-backend-option:
+    name: Cleanup Backend (Optional)
+    runs-on: ubuntu-latest
+    needs: terraform-destroy
+    if: github.event.inputs.environment == 'dev'
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Optional backend cleanup message
+        run: |
+          echo "## Backend Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To completely remove the Terraform backend (S3 bucket and DynamoDB table)," >> $GITHUB_STEP_SUMMARY
+          echo "run the cleanup script manually:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "cd infrastructure/AWS" >> $GITHUB_STEP_SUMMARY
+          echo "./scripts/cleanup-backend.sh" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Warning**: This will delete all Terraform state files!" >> $GITHUB_STEP_SUMMARY
