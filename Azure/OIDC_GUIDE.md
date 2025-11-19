@@ -140,6 +140,8 @@ The OIDC token from GitHub includes claims that Azure AD validates:
 
 Azure federated credentials validate the `sub` claim against configured subjects:
 
+#### Repository-Level (Specific Repo)
+
 | Context | Subject Pattern |
 |---------|----------------|
 | Main branch | `repo:ORG/REPO:ref:refs/heads/main` |
@@ -148,6 +150,35 @@ Azure federated credentials validate the `sub` claim against configured subjects
 | Pull requests | `repo:ORG/REPO:pull_request` |
 | Environment | `repo:ORG/REPO:environment:ENV` |
 | Tags | `repo:ORG/REPO:ref:refs/tags/*` |
+
+#### Organization-Level (All Repos in Org)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All repos, all branches** | `repo:ORG/*:*` | Any workflow in any repo under organization |
+| **All repos, main only** | `repo:ORG/*:ref:refs/heads/main` | Only main branch workflows across all repos |
+| **All repos, PRs only** | `repo:ORG/*:pull_request` | Only PR workflows across all repos |
+| **All repos, specific env** | `repo:ORG/*:environment:production` | Only production environment across all repos |
+| **All repos, tags** | `repo:ORG/*:ref:refs/tags/*` | Only tag-triggered workflows across all repos |
+
+#### User-Level (All Repos for User)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All user repos** | `repo:USERNAME/*:*` | Any workflow in any repo under username |
+| **User repos, main only** | `repo:USERNAME/*:ref:refs/heads/main` | Only main branch workflows for user repos |
+
+#### Enterprise-Level (GitHub Enterprise)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All enterprise repos** | `repo:*/*:*` | ⚠️ **Not recommended** - Too broad |
+| **Enterprise with filter** | Use multiple federated credentials | Create separate credentials for each org |
+
+**💡 Best Practice:** 
+- Use **organization-level** patterns (`repo:ORG/*:*`) for shared infrastructure roles
+- Use **repository-specific** patterns for sensitive operations or production deployments
+- Create **multiple federated credentials** for different contexts (dev, staging, prod)
 
 ---
 
@@ -350,27 +381,41 @@ resource "azuread_service_principal" "github_actions" {
   owners    = [data.azurerm_client_config.current.object_id]
 }
 
-# Federated Credential - Main Branch
-resource "azuread_application_federated_identity_credential" "main" {
+# Federated Credential - Organization-Level (All Repos)
+# Option 1: Use this for organization-wide access (recommended for shared infrastructure)
+resource "azuread_application_federated_identity_credential" "org_all" {
   application_id = azuread_application.github_actions.id
-  display_name   = "github-actions-main"
-  description    = "GitHub Actions - Main Branch"
+  display_name   = "github-actions-org-all"
+  description    = "GitHub Actions - All repos in organization"
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"
+  subject        = "repo:${var.github_org}/*:*"
 }
 
-# Federated Credential - Pull Requests
-resource "azuread_application_federated_identity_credential" "pull_request" {
-  application_id = azuread_application.github_actions.id
-  display_name   = "github-actions-pr"
-  description    = "GitHub Actions - Pull Requests"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}/${var.github_repo}:pull_request"
-}
+# Federated Credential - Specific Repository (Alternative)
+# Option 2: Use these for repository-specific access
+# Uncomment if you prefer repo-specific over org-level
+
+# resource "azuread_application_federated_identity_credential" "main" {
+#   application_id = azuread_application.github_actions.id
+#   display_name   = "github-actions-main"
+#   description    = "GitHub Actions - Main Branch"
+#   audiences      = ["api://AzureADTokenExchange"]
+#   issuer         = "https://token.actions.githubusercontent.com"
+#   subject        = "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"
+# }
+
+# resource "azuread_application_federated_identity_credential" "pull_request" {
+#   application_id = azuread_application.github_actions.id
+#   display_name   = "github-actions-pr"
+#   description    = "GitHub Actions - Pull Requests"
+#   audiences      = ["api://AzureADTokenExchange"]
+#   issuer         = "https://token.actions.githubusercontent.com"
+#   subject        = "repo:${var.github_org}/${var.github_repo}:pull_request"
+# }
 
 # Federated Credential - Environments (optional)
+# You can combine org-level with environment-specific credentials
 resource "azuread_application_federated_identity_credential" "environments" {
   for_each = toset(var.github_environments)
 
@@ -379,7 +424,11 @@ resource "azuread_application_federated_identity_credential" "environments" {
   description    = "GitHub Actions - ${each.value} Environment"
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}/${var.github_repo}:environment:${each.value}"
+  # For org-level + environment: repo:ORG/*:environment:ENV
+  subject        = "repo:${var.github_org}/*:environment:${each.value}"
+  
+  # For repo-specific + environment (uncomment if needed):
+  # subject = "repo:${var.github_org}/${var.github_repo}:environment:${each.value}"
 }
 
 # Role Assignment - Contributor
@@ -433,9 +482,15 @@ variable "github_org" {
   type        = string
 }
 
-variable "github_repo" {
-  description = "GitHub repository name"
+variable "github_org" {
+  description = "GitHub organization or username"
   type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (optional - only needed for repo-specific access)"
+  type        = string
+  default     = "*"  # Wildcard for org-level access
 }
 
 variable "github_environments" {
@@ -451,7 +506,13 @@ variable "github_environments" {
 project_name = "testcontainers"
 environment  = "dev"
 github_org   = "YOUR_GITHUB_ORG_OR_USERNAME"
-github_repo  = "YOUR_REPO_NAME"
+
+# For organization-level access (recommended for shared infrastructure):
+# Leave github_repo as default "*" or omit it
+
+# For repository-specific access:
+# github_repo = "YOUR_REPO_NAME"
+
 github_environments = ["production", "staging"]
 ```
 
@@ -536,6 +597,34 @@ az role assignment list --assignee $APP_ID
 2. Click **Federated credentials** tab
 3. Click **Add credential**
 
+#### Step 2: Create Federated Credentials
+
+1. In your app registration, go to **Certificates & secrets**
+2. Click **Federated credentials** tab
+3. Click **Add credential**
+
+You have two options:
+
+**Option A: Organization-Level (All Repos) - Recommended**
+
+**Credential 1 - All Repos in Organization:**
+- **Federated credential scenario**: Other issuer
+- **Issuer**: `https://token.actions.githubusercontent.com`
+- **Subject identifier**: `repo:YOUR_ORG/*:*`
+- **Audience**: `api://AzureADTokenExchange`
+- **Name**: `github-actions-org-all`
+- Click **Add**
+
+**Credential 2 - All Repos, Main Branch Only (Optional):**
+- **Subject identifier**: `repo:YOUR_ORG/*:ref:refs/heads/main`
+- **Name**: `github-actions-org-main`
+
+**Credential 3 - All Repos, Specific Environment (Optional):**
+- **Subject identifier**: `repo:YOUR_ORG/*:environment:production`
+- **Name**: `github-actions-org-production`
+
+**Option B: Repository-Specific**
+
 **Credential 1 - Main Branch:**
 - **Federated credential scenario**: GitHub Actions deploying Azure resources
 - **Organization**: Your GitHub username or org
@@ -561,6 +650,8 @@ az role assignment list --assignee $APP_ID
 - **GitHub environment name**: `production` (repeat for each environment)
 - **Name**: `github-actions-production`
 - Click **Add**
+
+**💡 Tip:** For Option A, use the **Other issuer** scenario to manually enter the subject identifier with wildcards.
 
 #### Step 3: Assign Roles
 
@@ -606,8 +697,8 @@ Add all three IDs to GitHub Secrets.
 export AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 export AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
 export APP_NAME="testcontainers-dev-github-actions"
-export GITHUB_ORG="YOUR_GITHUB_ORG"
-export GITHUB_REPO="YOUR_REPO_NAME"
+export GITHUB_ORG="YOUR_GITHUB_ORG"  # or USERNAME for user-level
+# export GITHUB_REPO="YOUR_REPO_NAME"  # Only needed for repo-specific access
 ```
 
 #### Step 2: Create App Registration
@@ -637,6 +728,59 @@ echo "Service Principal Object ID: $SP_OBJECT_ID"
 ```
 
 #### Step 4: Create Federated Credentials
+
+Choose the appropriate pattern for your use case:
+
+**Option A: Organization-Level (All repos in org) - Recommended**
+```bash
+az ad app federated-credential create \
+  --id $OBJECT_ID \
+  --parameters '{
+    "name": "github-actions-org-all",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:'"$GITHUB_ORG"'/*:*",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+**Option B: Organization-Level, Main Branch Only**
+```bash
+az ad app federated-credential create \
+  --id $OBJECT_ID \
+  --parameters '{
+    "name": "github-actions-org-main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:'"$GITHUB_ORG"'/*:ref:refs/heads/main",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+**Option C: Organization-Level, Specific Environment**
+```bash
+az ad app federated-credential create \
+  --id $OBJECT_ID \
+  --parameters '{
+    "name": "github-actions-org-production",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:'"$GITHUB_ORG"'/*:environment:production",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+**Option D: User-Level (All repos for a user)**
+```bash
+# Change $GITHUB_ORG to your username
+az ad app federated-credential create \
+  --id $OBJECT_ID \
+  --parameters '{
+    "name": "github-actions-user-all",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:YOUR_USERNAME/*:*",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+**Option E: Repository-Specific (use these if you need per-repo credentials)**
 
 **Main Branch:**
 ```bash
@@ -673,6 +817,8 @@ az ad app federated-credential create \
     "audiences": ["api://AzureADTokenExchange"]
   }'
 ```
+
+**💡 Tip:** For organization-wide infrastructure deployment, use Option A or B. For production deployments, consider Option C with environment protection rules.
 
 #### Step 5: Assign Roles
 

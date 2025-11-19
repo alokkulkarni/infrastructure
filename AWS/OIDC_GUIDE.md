@@ -132,6 +132,8 @@ The OIDC token includes claims that AWS uses to validate access:
 
 Configure different trust policies for different contexts:
 
+#### Repository-Level (Specific Repo)
+
 | Context | Subject Pattern |
 |---------|----------------|
 | Main branch | `repo:ORG/REPO:ref:refs/heads/main` |
@@ -140,6 +142,31 @@ Configure different trust policies for different contexts:
 | Pull requests | `repo:ORG/REPO:pull_request` |
 | Environment | `repo:ORG/REPO:environment:ENV` |
 | Any repo action | `repo:ORG/REPO:*` |
+
+#### Organization-Level (All Repos in Org)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All repos, all branches** | `repo:ORG/*:*` | Any workflow in any repo under organization |
+| **All repos, main only** | `repo:ORG/*:ref:refs/heads/main` | Only main branch workflows across all repos |
+| **All repos, PRs only** | `repo:ORG/*:pull_request` | Only PR workflows across all repos |
+| **All repos, specific env** | `repo:ORG/*:environment:production` | Only production environment across all repos |
+
+#### User-Level (All Repos for User)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All user repos** | `repo:USERNAME/*:*` | Any workflow in any repo under username |
+| **User repos, main only** | `repo:USERNAME/*:ref:refs/heads/main` | Only main branch workflows for user repos |
+
+#### Enterprise-Level (GitHub Enterprise)
+
+| Context | Subject Pattern | Description |
+|---------|----------------|-------------|
+| **All enterprise repos** | `repo:*/*:*` | ⚠️ **Not recommended** - Too broad |
+| **Enterprise with filter** | Use multiple specific patterns | Combine org-level patterns for better control |
+
+**💡 Best Practice:** Use organization-level patterns for shared infrastructure roles, and repository-specific patterns for sensitive operations.
 
 ---
 
@@ -248,10 +275,26 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      # Allow this GitHub repo to assume the role
-      values = [
-        "repo:${var.github_org}/${var.github_repo}:*"
-      ]
+      # Choose ONE of the following patterns based on your needs:
+      
+      # Option 1: Single repository (most restrictive)
+      # values = ["repo:${var.github_org}/${var.github_repo}:*"]
+      
+      # Option 2: All repositories in organization (recommended for shared infra)
+      values = ["repo:${var.github_org}/*:*"]
+      
+      # Option 3: All repos, but only main branch
+      # values = ["repo:${var.github_org}/*:ref:refs/heads/main"]
+      
+      # Option 4: Multiple specific repos
+      # values = [
+      #   "repo:${var.github_org}/repo1:*",
+      #   "repo:${var.github_org}/repo2:*",
+      #   "repo:${var.github_org}/repo3:*"
+      # ]
+      
+      # Option 5: All repos in organization, only production environment
+      # values = ["repo:${var.github_org}/*:environment:production"]
     }
   }
 }
@@ -301,8 +344,9 @@ variable "github_org" {
 }
 
 variable "github_repo" {
-  description = "GitHub repository name"
+  description = "GitHub repository name (optional - only needed for repo-specific access)"
   type        = string
+  default     = "*"  # Wildcard for org-level access
 }
 ```
 
@@ -311,7 +355,12 @@ variable "github_repo" {
 ```hcl
 aws_region  = "us-east-1"
 github_org  = "YOUR_GITHUB_ORG_OR_USERNAME"
-github_repo = "YOUR_REPO_NAME"
+
+# For organization-level access (recommended for shared infrastructure):
+# Leave github_repo as default "*" or omit it
+
+# For repository-specific access:
+# github_repo = "YOUR_REPO_NAME"
 ```
 
 #### Step 3: Apply Bootstrap Configuration
@@ -398,7 +447,34 @@ The OIDC provider and role remain in AWS and can be managed through your main Te
 
 1. Open the role you created
 2. Go to **Trust relationships** → **Edit trust policy**
-3. Replace with:
+3. Replace with one of the following options:
+
+**Option A: Organization-Level (All Repos in Org) - Recommended**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:YOUR_ORG/*:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Option B: Repository-Specific**
 
 ```json
 {
@@ -423,9 +499,36 @@ The OIDC provider and role remain in AWS and can be managed through your main Te
 }
 ```
 
+**Option C: User-Level (All Repos for Username)**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:YOUR_USERNAME/*:*"
+        }
+      }
+    }
+  ]
+}
+```
+
 **Replace:**
 - `YOUR_ACCOUNT_ID` with your AWS account ID
-- `YOUR_ORG/YOUR_REPO` with your GitHub organization/username and repository name
+- `YOUR_ORG` with your GitHub organization name
+- `YOUR_REPO` with repository name (Option B only)
+- `YOUR_USERNAME` with your GitHub username (Option C only)
 
 4. Click **Update policy**
 
@@ -444,8 +547,8 @@ The OIDC provider and role remain in AWS and can be managed through your main Te
 ```bash
 export AWS_REGION="us-east-1"
 export ROLE_NAME="testcontainers-dev-github-actions-role"
-export GITHUB_ORG="YOUR_GITHUB_ORG"
-export GITHUB_REPO="YOUR_REPO_NAME"
+export GITHUB_ORG="YOUR_GITHUB_ORG"  # or USERNAME for user-level
+# export GITHUB_REPO="YOUR_REPO_NAME"  # Only needed for repo-specific access
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```
 
@@ -468,7 +571,10 @@ echo "OIDC Provider ARN: $OIDC_PROVIDER_ARN"
 
 #### Step 3: Create Trust Policy
 
+Choose the appropriate pattern for your use case:
+
 ```bash
+# Option A: Organization-Level (All repos in org) - Recommended
 cat > trust-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -484,13 +590,22 @@ cat > trust-policy.json <<EOF
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:$GITHUB_ORG/$GITHUB_REPO:*"
+          "token.actions.githubusercontent.com:sub": "repo:$GITHUB_ORG/*:*"
         }
       }
     }
   ]
 }
 EOF
+
+# Option B: Repository-Specific
+# Change "repo:$GITHUB_ORG/*:*" to "repo:$GITHUB_ORG/$GITHUB_REPO:*"
+
+# Option C: User-Level (all repos for a user)
+# Change "repo:$GITHUB_ORG/*:*" to "repo:$YOUR_USERNAME/*:*"
+
+# Option D: Organization-Level, Main Branch Only
+# Change "repo:$GITHUB_ORG/*:*" to "repo:$GITHUB_ORG/*:ref:refs/heads/main"
 ```
 
 #### Step 4: Create IAM Role
