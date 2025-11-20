@@ -510,17 +510,26 @@ RUNNER_TOKEN="${github_runner_token}"
 RUNNER_NAME="${github_runner_name}"
 RUNNER_LABELS="${github_runner_labels}"
 
+echo "Runner configuration:"
+echo "  Repository URL: $GITHUB_REPO_URL"
+echo "  Runner Name: $RUNNER_NAME"
+echo "  Runner Labels: $RUNNER_LABELS"
+echo "  Token provided: $(if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+
 # If token is not provided via Terraform, try to generate it
 if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
-    echo "No runner token provided. Runner will need to be configured manually."
+    echo "❌ ERROR: No runner token provided. Runner will need to be configured manually."
     echo "To configure manually, run as the runner user:"
     echo "sudo su - runner"
     echo "cd $RUNNER_DIR"
     echo "./config.sh --url $GITHUB_REPO_URL --token YOUR_TOKEN --name $RUNNER_NAME --labels $RUNNER_LABELS"
+    echo "⚠️  WARNING: Runner is NOT registered and will NOT pick up jobs!"
 else
+    echo "✅ Runner token provided, proceeding with registration..."
     # Configure runner as runner user
     sudo -u runner bash <<EOF
 cd $RUNNER_DIR
+echo "Running runner configuration..."
 ./config.sh \
     --url $GITHUB_REPO_URL \
     --token $RUNNER_TOKEN \
@@ -528,14 +537,36 @@ cd $RUNNER_DIR
     --labels $RUNNER_LABELS \
     --unattended \
     --replace
+
+if [ \$? -eq 0 ]; then
+    echo "✅ Runner configuration successful"
+else
+    echo "❌ Runner configuration failed with exit code \$?"
+    exit 1
+fi
 EOF
 
-    # Install runner as a service
-    cd $RUNNER_DIR
-    ./svc.sh install runner
-    ./svc.sh start
+    if [ $? -eq 0 ]; then
+        echo "✅ Runner configured successfully as runner user"
+        
+        # Install runner as a service
+        cd $RUNNER_DIR
+        ./svc.sh install runner
+        ./svc.sh start
 
-    echo "GitHub Actions Runner configured and started as a service"
+        echo "✅ GitHub Actions Runner configured and started as a service"
+        
+        # Verify service is running
+        sleep 2
+        if systemctl is-active --quiet actions.runner.* 2>/dev/null || ./svc.sh status | grep -q "active"; then
+            echo "✅ Runner service is running"
+        else
+            echo "⚠️  WARNING: Runner service may not be running properly"
+        fi
+    else
+        echo "❌ Failed to configure runner"
+        exit 1
+    fi
 fi
 
 # Create a systemd service for the runner (alternative to svc.sh)
