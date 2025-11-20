@@ -15,7 +15,7 @@ on:
       aws_region:
         description: 'AWS Region'
         required: true
-        default: 'us-east-1'
+        default: 'eu-west-2'
         type: string
       environment_tag:
         description: 'Environment Tag (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM) - Used for resource isolation and state management. Example: SIT-john-teamA-20251120-1430'
@@ -24,7 +24,7 @@ on:
 
 env:
   TF_VERSION: '1.6.0'
-  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'eu-west-2' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
   ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 
@@ -177,6 +177,16 @@ jobs:
           chmod +x scripts/import-existing-oidc.sh
           cd terraform
           ../scripts/import-existing-oidc.sh
+
+      - name: Import existing EC2 IAM role if present
+        working-directory: AWS
+        env:
+          PROJECT_NAME: testcontainers
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          chmod +x scripts/import-existing-ec2-role.sh
+          cd terraform
+          ../scripts/import-existing-ec2-role.sh
 
       - name: Terraform Validate
         working-directory: AWS/terraform

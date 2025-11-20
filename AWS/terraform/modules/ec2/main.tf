@@ -34,6 +34,11 @@ resource "aws_iam_role" "ec2" {
   tags = {
     Name = "${var.project_name}-${var.environment}-ec2-role"
   }
+
+  lifecycle {
+    # Allow import of existing role
+    ignore_changes = [assume_role_policy]
+  }
 }
 
 # IAM Policy for EC2 (ECR, S3, CloudWatch)

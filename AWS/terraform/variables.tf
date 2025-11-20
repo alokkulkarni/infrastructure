@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy resources"
   type        = string
-  default     = "us-east-1"
+  default     = "eu-west-2"
 }
 
 variable "project_name" {
@@ -30,13 +30,13 @@ variable "vpc_cidr" {
 variable "availability_zone" {
   description = "Availability zone for private subnet"
   type        = string
-  default     = "us-east-1a"
+  default     = "eu-west-2a"
 }
 
 variable "availability_zone_2" {
   description = "Second availability zone for public subnet (ALB requires 2 AZs)"
   type        = string
-  default     = "us-east-1b"
+  default     = "eu-west-2b"
 }
 
 variable "public_subnet_cidr" {

@@ -15,7 +15,7 @@ on:
       aws_region:
         description: 'AWS Region'
         required: true
-        default: 'us-east-1'
+        default: 'eu-west-2'
         type: string
       environment_tag:
         description: 'Environment Tag (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM) - Must match the tag used during deployment. Example: SIT-john-teamA-20251120-1430'
@@ -28,7 +28,7 @@ on:
 
 env:
   TF_VERSION: '1.6.0'
-  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'eu-west-2' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
   ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 
