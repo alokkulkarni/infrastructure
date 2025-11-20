@@ -42,7 +42,7 @@ echo ""
 # Check if resource group exists
 echo -e "${YELLOW}Checking if resource group exists...${NC}"
 if az group show --name $RESOURCE_GROUP_NAME &> /dev/null; then
-    echo -e "${GREEN}✓ Resource group already exists${NC}"
+    echo -e "${GREEN}✓ Resource group already exists, reusing existing resource group${NC}"
 else
     echo -e "${YELLOW}Creating resource group...${NC}"
     az group create \
@@ -55,7 +55,7 @@ fi
 # Check if storage account exists
 echo -e "${YELLOW}Checking if storage account exists...${NC}"
 if az storage account show --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP_NAME &> /dev/null; then
-    echo -e "${GREEN}✓ Storage account already exists${NC}"
+    echo -e "${GREEN}✓ Storage account already exists, reusing existing storage account${NC}"
 else
     echo -e "${YELLOW}Creating storage account...${NC}"
     az storage account create \
@@ -87,7 +87,7 @@ if az storage container show \
     --name $CONTAINER_NAME \
     --account-name $STORAGE_ACCOUNT_NAME \
     --account-key $ACCOUNT_KEY &> /dev/null; then
-    echo -e "${GREEN}✓ Container already exists${NC}"
+    echo -e "${GREEN}✓ Container already exists, reusing existing container${NC}"
 else
     echo -e "${YELLOW}Creating container...${NC}"
     az storage container create \
@@ -100,6 +100,11 @@ fi
 
 echo ""
 echo -e "${GREEN}✓ Terraform backend setup complete!${NC}"
+echo ""
+echo -e "${YELLOW}IMPORTANT: This script is idempotent and reuses existing resources.${NC}"
+echo "- Resource group, storage account, and container are shared across all environments"
+echo "- Each environment uses a different state file blob (key)"
+echo "- No resources are recreated if they already exist"
 echo ""
 echo -e "${YELLOW}Backend Configuration:${NC}"
 echo "  resource_group_name  = \"$RESOURCE_GROUP_NAME\""

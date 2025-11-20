@@ -45,8 +45,11 @@ echo "AWS credentials verified."
 echo ""
 
 # Create S3 bucket
-echo "Creating S3 bucket: $BUCKET_NAME"
-if aws s3 ls "s3://$BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
+echo "Checking S3 bucket: $BUCKET_NAME"
+if aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$AWS_REGION" 2>/dev/null; then
+    echo "✓ S3 bucket already exists, reusing existing bucket."
+else
+    echo "Creating S3 bucket: $BUCKET_NAME"
     aws s3api create-bucket \
         --bucket "$BUCKET_NAME" \
         --region "$AWS_REGION" \
@@ -108,15 +111,16 @@ if aws s3 ls "s3://$BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
         --region "$AWS_REGION"
     
     echo "S3 bucket configuration completed."
-else
-    echo "S3 bucket already exists."
 fi
 
 echo ""
 
 # Create DynamoDB table for state locking
-echo "Creating DynamoDB table: $DYNAMODB_TABLE"
-if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_REGION" &> /dev/null; then
+echo "Checking DynamoDB table: $DYNAMODB_TABLE"
+if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_REGION" &> /dev/null; then
+    echo "✓ DynamoDB table already exists, reusing existing table."
+else
+    echo "Creating DynamoDB table: $DYNAMODB_TABLE"
     aws dynamodb create-table \
         --table-name "$DYNAMODB_TABLE" \
         --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -131,14 +135,17 @@ if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_R
         --region "$AWS_REGION"
     
     echo "DynamoDB table created successfully."
-else
-    echo "DynamoDB table already exists."
 fi
 
 echo ""
 echo "======================================"
 echo "Backend setup completed successfully!"
 echo "======================================"
+echo ""
+echo "IMPORTANT: This script is idempotent and reuses existing resources."
+echo "- S3 bucket and DynamoDB table are shared across all environments"
+echo "- Each environment uses a different state file path (key)"
+echo "- No resources are recreated if they already exist"
 echo ""
 echo "Your backend configuration:"
 echo ""
