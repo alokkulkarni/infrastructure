@@ -71,7 +71,7 @@ resource "aws_iam_instance_profile" "ec2" {
 
 # User Data Script
 locals {
-  user_data = templatefile("${path.module}/user-data.sh", {
+  user_data_template = templatefile("${path.module}/user-data.sh", {
     github_runner_token  = var.github_runner_token
     github_repo_url      = var.github_repo_url
     github_runner_name   = var.github_runner_name
@@ -87,7 +87,8 @@ resource "aws_instance" "main" {
   vpc_security_group_ids = var.security_group_ids
   iam_instance_profile   = aws_iam_instance_profile.ec2.name
 
-  user_data = local.user_data
+  # Use user_data_base64 with gzip to handle large scripts (>16KB)
+  user_data_base64 = base64gzip(local.user_data_template)
 
   root_block_device {
     volume_size           = 50
@@ -107,6 +108,6 @@ resource "aws_instance" "main" {
   }
 
   lifecycle {
-    ignore_changes = [user_data]
+    ignore_changes = [user_data_base64]
   }
 }
