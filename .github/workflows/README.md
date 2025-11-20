@@ -1,409 +1,760 @@
-# GitHub Actions Workflows
-
-This directory contains GitHub Actions workflows for deploying and managing AWS infrastructure.
-
-## Available Workflows
-
-### 1. Deploy AWS Infrastructure (`deploy-aws-infrastructure.yml`)
-
-**Trigger**: Manual (workflow_dispatch)
-
-**Purpose**: Deploys complete AWS infrastructure including VPC, EC2, and GitHub Actions runner.
-
-**Jobs**:
-1. **setup-backend**: Creates S3 bucket and DynamoDB table for Terraform state
-2. **generate-runner-token**: Generates GitHub Actions runner registration token
-3. **terraform-plan**: Plans infrastructure changes
-4. **terraform-apply**: Applies infrastructure (requires environment approval if configured)
-
-**Inputs**:
-- `environment`: Environment to deploy (dev/staging/prod)
-- `aws_region`: AWS region (default: us-east-1)
-
-**Usage**:
-```
-1. Go to Actions tab
-2. Select "Deploy AWS Infrastructure"
-3. Click "Run workflow"
-4. Choose environment and region
-5. Click "Run workflow" button
-```
-
-### 2. Destroy AWS Infrastructure (`destroy-aws-infrastructure.yml`)
-
-**Trigger**: Manual (workflow_dispatch)
-
-**Purpose**: Destroys all AWS infrastructure resources.
-
-**Jobs**:
-1. **validate-confirmation**: Ensures user types "destroy" to confirm
-2. **terraform-destroy**: Destroys all resources
-3. **cleanup-backend-option**: Optional backend cleanup (dev environment only)
-
-**Inputs**:
-- `environment`: Environment to destroy
-- `aws_region`: AWS region
-- `confirm_destroy`: Type "destroy" to confirm (required)
-
-**Usage**:
-```
-1. Go to Actions tab
-2. Select "Destroy AWS Infrastructure"
-3. Click "Run workflow"
-4. Choose environment and region
-5. Type "destroy" in confirmation field
-6. Click "Run workflow" button
-```
-
-## Required Secrets
-
-Configure these secrets in your repository:
-
-**Settings → Secrets and variables → Actions → New repository secret**
-
-| Secret Name | Description | Required | Example |
-|------------|-------------|----------|---------|
-| `AWS_ACCESS_KEY_ID` | AWS Access Key ID | ✅ Yes | `AKIAIOSFODNN7EXAMPLE` |
-| `AWS_SECRET_ACCESS_KEY` | AWS Secret Access Key | ✅ Yes | `wJalrXUtnFEMI/K7MDENG/...` |
-| `EC2_KEY_NAME` | EC2 Key Pair Name | ✅ Yes | `testcontainers-runner` |
-| `PAT_TOKEN` | GitHub Personal Access Token | ✅ Yes | `ghp_xxxxxxxxxxxx` |
-| `TERRAFORM_STATE_BUCKET` | S3 Bucket for State | ❌ No | `testcontainers-terraform-state` |
-| `TERRAFORM_LOCK_TABLE` | DynamoDB Lock Table | ❌ No | `testcontainers-terraform-locks` |
-| `ALLOWED_SSH_CIDR` | CIDR for SSH Access | ❌ No | `203.0.113.0/32` |
-
-### Creating Required Secrets
-
-#### 1. AWS Credentials
-
-```bash
-# If using AWS CLI profile
-aws configure get aws_access_key_id
-aws configure get aws_secret_access_key
-```
-
-Or create new IAM user with programmatic access:
-1. AWS Console → IAM → Users → Add User
-2. Enable "Programmatic access"
-3. Attach policies: EC2, VPC, S3, DynamoDB, IAM
-4. Save Access Key ID and Secret Access Key
-
-#### 2. EC2 Key Pair
-
-```bash
-# Create new key pair
-aws ec2 create-key-pair \
-  --key-name testcontainers-runner \
-  --query 'KeyMaterial' \
-  --output text > ~/.ssh/testcontainers-runner.pem
-
-chmod 400 ~/.ssh/testcontainers-runner.pem
-
-# Use the name (without .pem): testcontainers-runner
-```
-
-#### 3. GitHub Personal Access Token (PAT)
-
-1. Go to: https://github.com/settings/tokens/new
-2. Note: "Terraform Infrastructure Deployment"
-3. Expiration: Choose appropriate duration
-4. Select scopes:
-   - ✅ `repo` (Full control of private repositories)
-   - ✅ `workflow` (Update GitHub Action workflows)
-   - ✅ `admin:org` → `manage_runners:org` (if using org runners)
-5. Generate token and save securely
-
-#### 4. Get Your IP for SSH Access
-
-```bash
-# Get your public IP
-curl -4 ifconfig.me
-
-# Use as: YOUR_IP/32 (e.g., 203.0.113.25/32)
-```
-
-## Environment Configuration (Optional but Recommended)
-
-Environments provide additional protection for production deployments.
-
-### Creating Environments
-
-1. Go to **Settings → Environments**
-2. Click **New environment**
-3. Create: `dev`, `staging`, `prod`, `dev-destroy`, `staging-destroy`, `prod-destroy`
-
-### Environment Protection Rules
-
-For `prod` and `prod-destroy`:
-
-1. **Required reviewers**: Add team members who must approve
-2. **Wait timer**: Optional delay before deployment (e.g., 5 minutes)
-3. **Deployment branches**: Restrict to `main` or `production` branch
-
-Example configuration:
-```
-Environment: prod
-├── Required reviewers: @devops-team
-├── Wait timer: 300 seconds (5 minutes)
-└── Deployment branches: main, release/*
-```
-
-## Workflow Execution Flow
-
-### Deploy Workflow
-
-```mermaid
-graph TD
-    A[Manual Trigger] --> B[Setup Backend]
-    B --> C[Generate Runner Token]
-    C --> D[Terraform Plan]
-    D --> E{Environment<br/>Approval?}
-    E -->|Required| F[Wait for Approval]
-    E -->|Not Required| G[Terraform Apply]
-    F --> G
-    G --> H[Output Results]
-    H --> I[Upload Outputs]
-```
-
-### Destroy Workflow
-
-```mermaid
-graph TD
-    A[Manual Trigger] --> B{Type 'destroy'?}
-    B -->|No| C[Fail - Confirmation Required]
-    B -->|Yes| D{Environment<br/>Approval?}
-    D -->|Required| E[Wait for Approval]
-    D -->|Not Required| F[Terraform Destroy]
-    E --> F
-    F --> G[Verify Destruction]
-    G --> H{Dev Environment?}
-    H -->|Yes| I[Show Backend Cleanup Info]
-    H -->|No| J[Complete]
-    I --> J
-```
-
-## Monitoring Workflow Runs
-
-### View Workflow Status
-
-1. Go to **Actions** tab
-2. Select workflow from left sidebar
-3. Click on specific run to view details
-
-### Understanding Job Status
-
-- 🟢 **Green**: Job completed successfully
-- 🟡 **Yellow**: Job in progress or waiting
-- 🔴 **Red**: Job failed
-- ⚪ **Gray**: Job skipped or not run
-
-### Viewing Logs
-
-1. Click on workflow run
-2. Click on specific job (e.g., "Terraform Apply")
-3. Click on step to view detailed logs
-4. Download logs: Click "⋯" → "Download log archive"
-
-## Advanced Usage
-
-### Running with Custom Variables
-
-Workflows use default values from `terraform.tfvars.example`. To override:
-
-1. **Fork workflow file**
-2. **Add workflow inputs** for custom values
-3. **Modify terraform commands** to use inputs
-
-Example:
-```yaml
-inputs:
-  instance_type:
-    description: 'EC2 Instance Type'
-    required: false
-    default: 't3.medium'
-    type: choice
-    options:
-      - t3.small
-      - t3.medium
-      - t3.large
-```
-
-### Multiple Environments
-
-Deploy to different environments:
-
-```bash
-# Dev environment (default)
-Workflow → Run → environment: dev
-
-# Staging environment
-Workflow → Run → environment: staging
-
-# Production environment
-Workflow → Run → environment: prod
-```
-
-Each environment gets its own:
-- State file: `aws/ec2-runner/{environment}/terraform.tfstate`
-- Resources: Tagged with environment name
-- Runner: Named with environment suffix
-
-### Scheduled Destruction (Cost Saving)
-
-To automatically destroy dev environment at night:
-
-```yaml
-# Add to destroy-aws-infrastructure.yml
-on:
-  schedule:
-    - cron: '0 22 * * *'  # 10 PM UTC daily
-  workflow_dispatch:
-    # ... existing inputs
-```
-
-## Troubleshooting Workflows
-
-### Common Issues
-
-#### 1. "Terraform state locked"
-
-**Cause**: Previous run was cancelled
-
-**Solution**:
-```bash
-# Get lock ID from workflow logs
-# Then manually unlock:
-cd infrastructure/AWS/terraform
-terraform init
-terraform force-unlock <LOCK_ID>
-```
-
-#### 2. "Invalid AWS credentials"
-
-**Cause**: Credentials expired or incorrect
-
-**Solution**:
-1. Verify secrets are set correctly
-2. Check IAM user permissions
-3. Generate new credentials if needed
-
-#### 3. "Runner token expired"
-
-**Cause**: Token is only valid for 1 hour
-
-**Solution**: Re-run workflow (it generates fresh token automatically)
-
-#### 4. "S3 bucket already exists"
-
-**Cause**: Backend already setup
-
-**Solution**: This is normal - backend setup is idempotent
-
-### Debug Mode
-
-Enable debug logging for workflows:
-
-1. **Settings → Secrets → Actions**
-2. Add secret: `ACTIONS_STEP_DEBUG` = `true`
-3. Add secret: `ACTIONS_RUNNER_DEBUG` = `true`
-4. Re-run workflow
-
-## Security Best Practices
-
-1. ✅ Use environment protection rules for production
-2. ✅ Rotate AWS credentials regularly
-3. ✅ Use minimal IAM permissions (principle of least privilege)
-4. ✅ Never commit secrets to repository
-5. ✅ Use GitHub environment secrets for sensitive values
-6. ✅ Enable branch protection for main branch
-7. ✅ Require code reviews for workflow changes
-8. ✅ Set PAT token expiration
-9. ✅ Monitor AWS CloudTrail for API calls
-10. ✅ Enable GitHub audit log
-
-## Workflow Maintenance
-
-### Updating Terraform Version
-
-Edit both workflow files:
-
-```yaml
-env:
-  TF_VERSION: '1.7.0'  # Update version
-```
-
-### Updating AWS Region
-
-Default region can be changed in workflow:
-
-```yaml
-env:
-  AWS_REGION: 'us-west-2'  # Change default
-```
-
-### Modifying Resource Tags
-
-Tags are applied via Terraform provider:
-
-```hcl
-# In main.tf
-provider "aws" {
-  default_tags {
-    tags = {
-      ManagedBy   = "Terraform"
-      Project     = var.project_name
-      Environment = var.environment
-      Team        = "DevOps"        # Add custom tags
-      CostCenter  = "Engineering"
-    }
-  }
-}
-```
-
-## CI/CD Integration
-
-### Using Self-Hosted Runner in Workflows
-
-Once deployed, use the runner:
-
-```yaml
-name: My Workflow
-on: [push]
-
-jobs:
-  build:
-    runs-on: [self-hosted, aws, linux, docker]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build with Docker
-        run: docker build -t myapp .
-```
-
-### Runner Labels
-
-Default labels:
-- `self-hosted`
-- `aws`
-- `linux`
-- `docker`
-- `{environment}` (e.g., `dev`, `prod`)
-
-Customize labels in workflow inputs or terraform.tfvars.
-
-## Cost Monitoring
-
-Track costs of workflow runs:
-
-1. **AWS Cost Explorer**: Monitor EC2, NAT Gateway costs
-2. **GitHub Actions Usage**: Settings → Billing → Actions
-3. **Set Budget Alerts**: AWS Budgets for cost thresholds
-
-## Getting Help
-
-- 📖 **Full Documentation**: [README.md](../README.md)
-- 🚀 **Quick Start**: [QUICKSTART.md](../QUICKSTART.md)
-- 🐛 **Issues**: [Open GitHub Issue](../../issues)
-- 💬 **Discussions**: [GitHub Discussions](../../discussions)
+# GitHub Actions Workflows for Infrastructure Deployment
+
+This directory contains GitHub Actions workflows for deploying and managing infrastructure on AWS and Azure using Terraform with self-hosted GitHub runners.
+
+## 📋 Table of Contents
+
+- [Overview](#overview)
+- [AWS Workflows](#aws-workflows)
+  - [deploy-aws-infrastructure.yml (Hybrid Authentication)](#deploy-aws-infrastructureyml-hybrid-authentication)
+  - [deploy-aws-infrastructure-oidc.yml (Pure OIDC) ⭐](#deploy-aws-infrastructure-oidcyml-pure-oidc-)
+  - [destroy-aws-infrastructure.yml](#destroy-aws-infrastructureyml)
+- [Azure Workflows](#azure-workflows)
+  - [deploy-azure-infrastructure.yml (Pure OIDC)](#deploy-azure-infrastructureyml-pure-oidc)
+  - [destroy-azure-infrastructure.yml](#destroy-azure-infrastructureyml)
+- [Prerequisites](#prerequisites)
+- [Secrets Configuration](#secrets-configuration)
+- [Security Best Practices](#security-best-practices)
+- [Setup Guides](#setup-guides)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-**Happy Deploying! 🚀**
+## Overview
+
+All workflows deploy infrastructure to run self-hosted GitHub Actions runners on cloud VMs (AWS EC2 or Azure VM) with Docker support. This enables TestContainers to run in CI/CD pipelines.
+
+**Key Features:**
+- Terraform-based infrastructure as code
+- Self-hosted GitHub runners with Docker
+- Environment-based deployments (dev/staging/prod)
+- Remote state management (S3/Azure Storage)
+- OIDC authentication for zero standing privileges
+
+---
+
+## AWS Workflows
+
+### deploy-aws-infrastructure.yml (Hybrid Authentication)
+
+**What it does:**
+- Deploys AWS infrastructure (VPC, subnets, EC2 instance, security groups)
+- Installs self-hosted GitHub runner with Docker on EC2
+- Uses **hybrid authentication**: OIDC for read operations (plan), AWS access keys for write operations (apply)
+
+**Authentication Model:**
+```yaml
+# setup-backend & terraform-plan jobs
+permissions:
+  id-token: write  # OIDC enabled
+Configure AWS credentials using OIDC:
+  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+# terraform-apply job
+Configure AWS credentials:
+  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}      # ⚠️ Long-lived credentials
+  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+**Required Secrets:**
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AWS_ROLE_ARN` | IAM Role ARN for OIDC (plan/backend) | `arn:aws:iam::123456789012:role/GitHubActionsRole` |
+| `AWS_ACCESS_KEY_ID` | IAM User access key (apply) | `AKIAIOSFODNN7EXAMPLE` |
+| `AWS_SECRET_ACCESS_KEY` | IAM User secret key (apply) | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `PAT_TOKEN` | GitHub Personal Access Token (runner registration) | `ghp_xxxxxxxxxxxxx` |
+| `TERRAFORM_STATE_BUCKET` | S3 bucket for Terraform state | `testcontainers-terraform-state` |
+| `TERRAFORM_LOCK_TABLE` | DynamoDB table for state locking | `terraform-state-lock` |
+| `EC2_KEY_NAME` | EC2 key pair name for SSH access | `testcontainers-ec2-key` |
+| `ALLOWED_SSH_CIDR` | CIDR for SSH access | `203.0.113.0/24` |
+
+**When to use:**
+- Migrating from pure access key authentication to OIDC
+- Organizations requiring access keys for compliance/approval workflows
+- Learning OIDC before full adoption
+
+**Security Considerations:**
+- ⚠️ Access keys are long-lived credentials (90-day rotation recommended)
+- ⚠️ Access keys can be compromised if leaked in logs or code
+- ✅ OIDC tokens used for plan operations are short-lived (1 hour)
+- ⚠️ Mixed authentication model increases complexity
+
+**Prerequisites:**
+1. AWS OIDC Identity Provider configured (for plan/backend jobs)
+2. IAM Role with trust policy for GitHub OIDC (for plan/backend)
+3. IAM User with programmatic access (for apply job)
+4. S3 bucket and DynamoDB table for Terraform state
+5. EC2 key pair created
+6. GitHub PAT with `repo` and `admin:org` scopes
+
+---
+
+### deploy-aws-infrastructure-oidc.yml (Pure OIDC) ⭐
+
+**RECOMMENDED** for new deployments and security-conscious environments.
+
+**What it does:**
+- Deploys AWS infrastructure (VPC, subnets, EC2 instance, security groups)
+- Installs self-hosted GitHub runner with Docker on EC2
+- Uses **pure OIDC authentication** for ALL operations (backend setup, plan, apply)
+
+**Authentication Model:**
+```yaml
+# ALL jobs (setup-backend, terraform-plan, terraform-apply)
+permissions:
+  id-token: write  # OIDC enabled
+
+Configure AWS credentials using OIDC:
+  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+  role-session-name: GitHubActions-<JobName>  # ✅ Short-lived (1 hour), traceable
+```
+
+**Key Differences from Hybrid:**
+| Aspect | Hybrid | Pure OIDC |
+|--------|--------|-----------|
+| **Apply Authentication** | AWS Access Keys | OIDC |
+| **Credential Lifecycle** | 90 days (manual rotation) | 1 hour (auto-expiring) |
+| **Required Secrets** | 8 secrets | 6 secrets |
+| **Security Posture** | Mixed | Zero standing privileges ✅ |
+| **AWS Recommendations** | Legacy | Best practice ✅ |
+| **Audit Trail** | CloudTrail (IAM User) | CloudTrail (Role session name) |
+
+**Required Secrets:**
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AWS_ROLE_ARN` | IAM Role ARN for OIDC (all operations) | `arn:aws:iam::123456789012:role/GitHubActionsRole` |
+| `PAT_TOKEN` | GitHub Personal Access Token | `ghp_xxxxxxxxxxxxx` |
+| `TERRAFORM_STATE_BUCKET` | S3 bucket for Terraform state | `testcontainers-terraform-state` |
+| `TERRAFORM_LOCK_TABLE` | DynamoDB table for state locking | `terraform-state-lock` |
+| `EC2_KEY_NAME` | EC2 key pair name | `testcontainers-ec2-key` |
+| `ALLOWED_SSH_CIDR` | CIDR for SSH access | `203.0.113.0/24` |
+
+**When to use:**
+- ✅ New infrastructure deployments
+- ✅ Security-first environments
+- ✅ Compliance requirements (SOC2, ISO 27001, PCI-DSS)
+- ✅ Zero-trust security model adoption
+- ✅ Reducing secret sprawl and rotation burden
+
+**Security Advantages:**
+- ✅ Zero long-lived credentials
+- ✅ Automatic credential expiration (1 hour)
+- ✅ No credential rotation management
+- ✅ Impossible to leak credentials (tokens generated at runtime)
+- ✅ Fine-grained IAM permissions via trust policy conditions
+- ✅ Clear audit trail with session names
+
+**Prerequisites:**
+1. AWS OIDC Identity Provider configured
+2. IAM Role with comprehensive trust policy for GitHub OIDC
+3. S3 bucket and DynamoDB table for Terraform state
+4. EC2 key pair created
+5. GitHub PAT with `repo` and `admin:org` scopes
+
+---
+
+### destroy-aws-infrastructure.yml
+
+**What it does:**
+- Destroys all AWS infrastructure for a specified environment
+- Requires explicit confirmation ("destroy" typed in workflow input)
+- Provides optional cleanup instructions for Terraform backend
+
+**Authentication Model:**
+```yaml
+# Uses AWS access keys (legacy approach)
+Configure AWS credentials:
+  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+**Required Secrets:**
+Same as `deploy-aws-infrastructure.yml` (hybrid):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `TERRAFORM_STATE_BUCKET`
+- `TERRAFORM_LOCK_TABLE`
+- `EC2_KEY_NAME`
+- `ALLOWED_SSH_CIDR`
+
+**Safety Features:**
+- ✅ Manual workflow dispatch only (no automatic triggers)
+- ✅ Confirmation input required (`confirm_destroy: "destroy"`)
+- ✅ Separate `<env>-destroy` GitHub environment (allows manual approvals)
+- ✅ Terraform plan destroy before actual destroy
+- ✅ Summary output with timestamp
+
+**When to use:**
+- Tearing down dev/staging environments
+- Cost optimization (destroying unused resources)
+- Complete environment cleanup before redeployment
+
+**⚠️ Warning:**
+- This workflow uses access keys instead of OIDC
+- Recommendation: Create a destroy-aws-infrastructure-oidc.yml variant for consistency
+
+---
+
+## Azure Workflows
+
+### deploy-azure-infrastructure.yml (Pure OIDC)
+
+**What it does:**
+- Deploys Azure infrastructure (VNet, subnets, VM, NSG)
+- Installs self-hosted GitHub runner with Docker on Azure VM
+- Uses **pure OIDC authentication** (Azure Federated Credentials) for ALL operations
+
+**Authentication Model:**
+```yaml
+# ALL jobs use OIDC
+permissions:
+  id-token: write  # Required for Azure OIDC
+
+Azure Login using OIDC:
+  client-id: ${{ secrets.AZURE_CLIENT_ID }}
+  tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+  subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+# Terraform uses ARM environment variables
+ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+ARM_USE_OIDC: true  # ✅ Enables OIDC authentication
+```
+
+**Required Secrets:**
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AZURE_CLIENT_ID` | Service Principal Application (client) ID | `12345678-1234-1234-1234-123456789012` |
+| `AZURE_TENANT_ID` | Microsoft Entra ID Tenant ID | `87654321-4321-4321-4321-210987654321` |
+| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID | `abcdef12-3456-7890-abcd-ef1234567890` |
+| `PAT_TOKEN` | GitHub Personal Access Token | `ghp_xxxxxxxxxxxxx` |
+| `TERRAFORM_STATE_RG` | Resource group for Terraform state storage | `terraform-state-rg` |
+| `TERRAFORM_STATE_STORAGE` | Storage account for Terraform state | `tfstatexxxxx` |
+
+**When to use:**
+- Azure-based infrastructure deployments
+- Organizations using Azure as primary cloud
+- Leveraging Azure's native OIDC support (Federated Credentials)
+
+**Security Advantages:**
+- ✅ Pure OIDC from the start (Azure has excellent OIDC support)
+- ✅ No Service Principal secrets required
+- ✅ Federated Credentials tied to specific GitHub repos/branches
+- ✅ Automatic token expiration and rotation
+- ✅ Simplified secret management (3 IDs instead of client secrets)
+
+**Prerequisites:**
+1. Azure Service Principal created
+2. Federated Credentials configured for GitHub Actions
+3. Service Principal assigned appropriate roles (Contributor or custom)
+4. Resource group and storage account for Terraform state
+5. GitHub PAT with `repo` and `admin:org` scopes
+
+---
+
+### destroy-azure-infrastructure.yml
+
+**What it does:**
+- Destroys all Azure infrastructure for a specified environment
+- Requires explicit confirmation ("destroy" typed in workflow input)
+- Uses pure OIDC authentication (consistent with deploy workflow)
+
+**Authentication Model:**
+```yaml
+# Uses OIDC (consistent with deploy workflow) ✅
+permissions:
+  id-token: write
+
+Azure Login using OIDC:
+  client-id: ${{ secrets.AZURE_CLIENT_ID }}
+  tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+  subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+**Required Secrets:**
+Same as `deploy-azure-infrastructure.yml`:
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `TERRAFORM_STATE_RG`
+- `TERRAFORM_STATE_STORAGE`
+
+**Safety Features:**
+- ✅ Manual workflow dispatch only
+- ✅ Confirmation input required (`confirm_destroy: "destroy"`)
+- ✅ Separate GitHub environment (allows manual approvals)
+- ✅ OIDC authentication (secure, consistent)
+- ✅ Summary output with status
+
+**Key Difference from AWS Destroy:**
+- ✅ Uses OIDC instead of access keys (Azure destroy workflow is more secure)
+- ✅ Consistent authentication model with deploy workflow
+
+---
+
+## Prerequisites
+
+### AWS Prerequisites (OIDC Setup)
+
+#### 1. Create OIDC Identity Provider
+
+```bash
+# Using AWS CLI
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
+```
+
+#### 2. Create IAM Role with Trust Policy
+
+Create `github-actions-trust-policy.json`:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:YOUR_ORG/YOUR_REPO:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+Create the role:
+```bash
+aws iam create-role \
+  --role-name GitHubActionsRole \
+  --assume-role-policy-document file://github-actions-trust-policy.json
+
+# Attach required policies
+aws iam attach-role-policy \
+  --role-name GitHubActionsRole \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess  # Or custom policy
+```
+
+#### 3. Create Terraform Backend Resources
+
+```bash
+cd infrastructure/AWS
+chmod +x scripts/setup-terraform-backend.sh
+export AWS_REGION=us-east-1
+./scripts/setup-terraform-backend.sh
+```
+
+This creates:
+- S3 bucket with versioning and encryption
+- DynamoDB table for state locking
+
+#### 4. Create EC2 Key Pair
+
+```bash
+aws ec2 create-key-pair \
+  --key-name testcontainers-ec2-key \
+  --query 'KeyMaterial' \
+  --output text > testcontainers-ec2-key.pem
+
+chmod 400 testcontainers-ec2-key.pem
+```
+
+#### 5. Create GitHub PAT
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Generate new token with scopes:
+   - `repo` (Full control of private repositories)
+   - `admin:org` → `manage_runners:org` (Manage organization runners)
+3. Copy token (starts with `ghp_`)
+
+---
+
+### Azure Prerequisites (OIDC Setup)
+
+#### 1. Create Service Principal
+
+```bash
+# Login to Azure
+az login
+
+# Create Service Principal
+az ad sp create-for-rbac \
+  --name "testcontainers-github-actions" \
+  --role contributor \
+  --scopes /subscriptions/YOUR_SUBSCRIPTION_ID
+
+# Note the output:
+# {
+#   "appId": "YOUR_CLIENT_ID",
+#   "displayName": "testcontainers-github-actions",
+#   "password": "NOT_NEEDED_FOR_OIDC",
+#   "tenant": "YOUR_TENANT_ID"
+# }
+```
+
+#### 2. Configure Federated Credentials
+
+```bash
+# Get Service Principal Object ID
+SP_OBJECT_ID=$(az ad sp list --display-name "testcontainers-github-actions" --query "[0].id" -o tsv)
+
+# Create Federated Credential
+az ad app federated-credential create \
+  --id $SP_OBJECT_ID \
+  --parameters '{
+    "name": "testcontainers-github-main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:YOUR_ORG/YOUR_REPO:ref:refs/heads/main",
+    "description": "GitHub Actions OIDC for main branch",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+
+# For pull requests and other branches, add additional credentials:
+az ad app federated-credential create \
+  --id $SP_OBJECT_ID \
+  --parameters '{
+    "name": "testcontainers-github-all",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:YOUR_ORG/YOUR_REPO:pull_request",
+    "description": "GitHub Actions OIDC for pull requests",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+#### 3. Create Terraform Backend Resources
+
+```bash
+cd infrastructure/Azure
+chmod +x scripts/setup-terraform-backend.sh
+export AZURE_LOCATION=eastus
+export RESOURCE_GROUP_NAME=terraform-state-rg
+export STORAGE_ACCOUNT_NAME=tfstatexxxxx  # Globally unique name
+./scripts/setup-terraform-backend.sh
+```
+
+---
+
+### AWS Prerequisites (Access Keys - Legacy)
+
+For `deploy-aws-infrastructure.yml` (hybrid) and `destroy-aws-infrastructure.yml`:
+
+#### 1. Create IAM User
+
+```bash
+aws iam create-user --user-name github-actions-terraform
+
+# Attach policy (use least privilege in production)
+aws iam attach-user-policy \
+  --user-name github-actions-terraform \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+```
+
+#### 2. Create Access Keys
+
+```bash
+aws iam create-access-key --user-name github-actions-terraform
+
+# Output:
+# {
+#   "AccessKey": {
+#     "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
+#     "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+#     "Status": "Active"
+#   }
+# }
+```
+
+⚠️ **Security Warning:** Store access keys securely. Never commit to Git. Rotate every 90 days.
+
+---
+
+## Secrets Configuration
+
+### Adding Secrets to GitHub
+
+1. Go to repository Settings → Secrets and variables → Actions
+2. Click "New repository secret"
+3. Add each required secret based on workflow choice
+
+### AWS Secrets (OIDC - Pure)
+
+Required for `deploy-aws-infrastructure-oidc.yml`:
+
+```
+AWS_ROLE_ARN=arn:aws:iam::123456789012:role/GitHubActionsRole
+PAT_TOKEN=ghp_xxxxxxxxxxxxx
+TERRAFORM_STATE_BUCKET=testcontainers-terraform-state
+TERRAFORM_LOCK_TABLE=terraform-state-lock
+EC2_KEY_NAME=testcontainers-ec2-key
+ALLOWED_SSH_CIDR=203.0.113.0/24
+```
+
+### AWS Secrets (Hybrid)
+
+Additional secrets for `deploy-aws-infrastructure.yml`:
+
+```
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+### Azure Secrets (OIDC - Pure)
+
+Required for `deploy-azure-infrastructure.yml` and `destroy-azure-infrastructure.yml`:
+
+```
+AZURE_CLIENT_ID=12345678-1234-1234-1234-123456789012
+AZURE_TENANT_ID=87654321-4321-4321-4321-210987654321
+AZURE_SUBSCRIPTION_ID=abcdef12-3456-7890-abcd-ef1234567890
+PAT_TOKEN=ghp_xxxxxxxxxxxxx
+TERRAFORM_STATE_RG=terraform-state-rg
+TERRAFORM_STATE_STORAGE=tfstatexxxxx
+```
+
+---
+
+## Security Best Practices
+
+### ✅ Recommended: Pure OIDC Authentication
+
+**Why OIDC?**
+1. **Zero Standing Privileges**: No long-lived credentials stored anywhere
+2. **Automatic Expiration**: Tokens expire in 1 hour (cannot be reused)
+3. **Impossible to Leak**: Tokens generated at runtime, never stored in secrets
+4. **Fine-grained Control**: IAM trust policies can restrict by repo, branch, environment
+5. **Better Audit Trail**: CloudTrail shows role session names (GitHubActions-TerraformApply)
+6. **No Rotation Burden**: No need to rotate credentials every 90 days
+7. **Compliance**: Meets SOC2, ISO 27001, PCI-DSS requirements
+
+**OIDC Trust Policy Example (Restrictive):**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:YourOrg/YourRepo:environment:prod"
+        }
+      }
+    }
+  ]
+}
+```
+
+This restricts the role to only the `prod` environment of a specific repository.
+
+### ⚠️ Legacy: Access Keys
+
+**When access keys might be used:**
+- Legacy systems not yet migrated to OIDC
+- Organizations with compliance requirements for specific approval workflows
+- Gradual migration path (hybrid approach)
+
+**If using access keys:**
+1. ✅ Rotate every 90 days (AWS recommendation)
+2. ✅ Use least privilege IAM policies (not AdministratorAccess)
+3. ✅ Enable CloudTrail logging
+4. ✅ Use AWS Secrets Manager or GitHub encrypted secrets
+5. ✅ Never commit keys to Git
+6. ✅ Use separate IAM users for different environments
+7. ✅ Enable MFA for IAM user console access
+8. ✅ Set up AWS Config rules to detect overly permissive policies
+
+### 🎯 Migration Path: Access Keys → Hybrid → Pure OIDC
+
+**Phase 1: Access Keys (Current State)**
+```yaml
+# All jobs use access keys
+aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+**Phase 2: Hybrid (Gradual Adoption)**
+```yaml
+# Read operations use OIDC
+role-to-assume: ${{ secrets.AWS_ROLE_ARN }}  # Plan, backend setup
+
+# Write operations use access keys
+aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}  # Apply
+aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+**Phase 3: Pure OIDC (Target State) ✅**
+```yaml
+# All operations use OIDC
+role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+```
+
+**Migration Steps:**
+1. Set up AWS OIDC provider and IAM role (see Prerequisites)
+2. Test OIDC with read-only operations (terraform plan)
+3. Gradually move write operations (terraform apply) to OIDC
+4. Monitor CloudTrail for any authentication issues
+5. Once stable, remove access keys from IAM and secrets
+
+### 📊 Comparison Table
+
+| Feature | Access Keys | Hybrid | Pure OIDC |
+|---------|-------------|--------|-----------|
+| **Security Posture** | ⚠️ Low | ⚠️ Medium | ✅ High |
+| **Credential Lifetime** | 90 days | Mixed | 1 hour |
+| **Rotation Burden** | Manual | Partial | None |
+| **Leak Risk** | High | Medium | None |
+| **Compliance** | Requires controls | Partial | ✅ Full |
+| **Audit Granularity** | IAM User | Mixed | Session names |
+| **Setup Complexity** | Low | Medium | Medium |
+| **AWS Recommendation** | ❌ Legacy | ⚠️ Transitional | ✅ Best Practice |
+
+---
+
+## Setup Guides
+
+### Quick Start: Deploy AWS Infrastructure (OIDC)
+
+1. **Complete AWS OIDC prerequisites** (see Prerequisites section)
+2. **Add secrets to GitHub** (6 required secrets)
+3. **Run workflow:**
+   - Go to Actions → Deploy AWS Infrastructure (OIDC)
+   - Click "Run workflow"
+   - Select environment (dev/staging/prod)
+   - Select AWS region
+   - Click "Run workflow"
+4. **Monitor deployment:**
+   - Watch workflow logs for progress
+   - Check Terraform outputs in job summary
+5. **Verify runner:**
+   - Go to Settings → Actions → Runners
+   - Confirm self-hosted runner is online
+
+### Quick Start: Deploy Azure Infrastructure
+
+1. **Complete Azure OIDC prerequisites** (see Prerequisites section)
+2. **Add secrets to GitHub** (6 required secrets)
+3. **Run workflow:**
+   - Go to Actions → Deploy Azure Infrastructure (OIDC)
+   - Click "Run workflow"
+   - Select environment (dev/staging/prod)
+   - Select Azure location (eastus/westus2/etc.)
+   - Click "Run workflow"
+4. **Monitor deployment:**
+   - Watch workflow logs
+   - Check Terraform outputs
+5. **Verify runner:**
+   - Confirm Azure VM runner appears in GitHub
+
+### Destroying Infrastructure
+
+**AWS:**
+1. Go to Actions → Destroy AWS Infrastructure
+2. Click "Run workflow"
+3. Select environment to destroy
+4. **Type "destroy" in confirmation field**
+5. Click "Run workflow"
+6. Review destruction plan in logs
+7. Confirm resources are deleted
+
+**Azure:**
+1. Go to Actions → Destroy Azure Infrastructure
+2. Click "Run workflow"
+3. Select environment to destroy
+4. **Type "destroy" in confirmation field**
+5. Click "Run workflow"
+6. Review destruction in logs
+7. Confirm resources are deleted
+
+---
+
+## Troubleshooting
+
+### OIDC Authentication Failures
+
+**Error:** `Error: Could not assume role with OIDC`
+
+**Solutions:**
+1. Verify OIDC provider exists:
+   ```bash
+   aws iam list-open-id-connect-providers
+   ```
+2. Check IAM role trust policy (ensure repo matches)
+3. Verify `id-token: write` permission in workflow
+4. Check IAM role ARN is correct in secrets
+
+### Terraform State Locking Issues
+
+**Error:** `Error acquiring the state lock`
+
+**Solutions:**
+1. Check DynamoDB table exists
+2. Verify state lock item in DynamoDB
+3. Manually release lock (if stale):
+   ```bash
+   terraform force-unlock <LOCK_ID>
+   ```
+
+### Runner Registration Failures
+
+**Error:** `Failed to register runner`
+
+**Solutions:**
+1. Verify PAT token has correct scopes (`repo`, `admin:org`)
+2. Check PAT token hasn't expired
+3. Ensure organization allows self-hosted runners
+4. Verify runner labels are correct
+
+### Azure Federated Credential Issues
+
+**Error:** `AADSTS700016: Application not found in directory`
+
+**Solutions:**
+1. Verify Service Principal exists:
+   ```bash
+   az ad sp list --display-name "testcontainers-github-actions"
+   ```
+2. Check federated credential configuration:
+   ```bash
+   az ad app federated-credential list --id <APP_OBJECT_ID>
+   ```
+3. Ensure `subject` matches your repo exactly
+
+---
+
+## Contributing
+
+When adding new workflows:
+1. Follow OIDC authentication pattern (avoid access keys)
+2. Include confirmation inputs for destructive operations
+3. Use separate GitHub environments for prod deployments
+4. Add comprehensive documentation to this README
+5. Test in dev environment before merging
+
+---
+
+## References
+
+- [AWS OIDC with GitHub Actions](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
+- [Azure OIDC with GitHub Actions](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-azure)
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [Terraform AzureRM Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
+- [GitHub Self-Hosted Runners](https://docs.github.com/en/actions/hosting-your-own-runners)
+
+---
+
+**Last Updated:** 2024  
+**Maintained By:** TestContainers Infrastructure Team
