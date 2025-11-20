@@ -53,12 +53,19 @@ output "ec2_security_group_id" {
   value       = module.security.ec2_security_group_id
 }
 
+# Get existing OIDC resources (created manually, not managed by Terraform)
+data "aws_iam_role" "github_actions" {
+  name = "${var.project_name}-${var.environment}-github-actions-role"
+}
+
+data "aws_caller_identity" "current" {}
+
 output "github_actions_role_arn" {
-  description = "ARN of the IAM role for GitHub Actions (use this in workflow)"
-  value       = module.iam_oidc.github_actions_role_arn
+  description = "ARN of the IAM role for GitHub Actions (existing, not managed by Terraform)"
+  value       = data.aws_iam_role.github_actions.arn
 }
 
 output "oidc_provider_arn" {
-  description = "ARN of the GitHub OIDC provider"
-  value       = module.iam_oidc.oidc_provider_arn
+  description = "ARN of the GitHub OIDC provider (existing, not managed by Terraform)"
+  value       = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
 }

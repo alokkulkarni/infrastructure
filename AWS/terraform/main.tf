@@ -22,17 +22,19 @@ provider "aws" {
 }
 
 # IAM OIDC Module for GitHub Actions
-module "iam_oidc" {
-  source = "./modules/iam-oidc"
-
-  project_name           = var.project_name
-  environment            = var.environment
-  environment_tag        = var.environment_tag
-  github_org             = var.github_org
-  github_repo            = var.github_repo
-  terraform_state_bucket = var.terraform_state_bucket
-  terraform_lock_table   = var.terraform_lock_table
-}
+# COMMENTED OUT: Role and OIDC provider already exist and are managed manually
+# Terraform should not modify the existing github-actions-role or its policies
+# module "iam_oidc" {
+#   source = "./modules/iam-oidc"
+#
+#   project_name           = var.project_name
+#   environment            = var.environment
+#   environment_tag        = var.environment_tag
+#   github_org             = var.github_org
+#   github_repo            = var.github_repo
+#   terraform_state_bucket = var.terraform_state_bucket
+#   terraform_lock_table   = var.terraform_lock_table
+# }
 
 # VPC and Networking
 module "networking" {
