@@ -3,11 +3,27 @@
  * 
  * Creates IAM role that GitHub Actions can assume via OIDC federation
  * Eliminates the need for long-lived AWS credentials
+ * 
+ * This module intelligently handles existing OIDC providers:
+ * - If OIDC provider already exists, it reuses it
+ * - If not, it creates a new one
  */
 
-# GitHub OIDC Provider
+# Get AWS account ID and region
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Calculate the expected OIDC provider ARN
+locals {
+  github_oidc_url = "https://token.actions.githubusercontent.com"
+  # OIDC provider ARN format: arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com
+  expected_oidc_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
+}
+
+# GitHub OIDC Provider - create only if needed
+# Note: This will succeed even if the provider already exists when using import
 resource "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
+  url = local.github_oidc_url
 
   client_id_list = ["sts.amazonaws.com"]
 
@@ -17,10 +33,15 @@ resource "aws_iam_openid_connect_provider" "github" {
   ]
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-github-oidc"
+    Name        = "${var.project_name}-github-oidc"
     Project     = var.project_name
-    Environment = var.environment
+    Environment = "shared" # OIDC provider is shared across all environments
     ManagedBy   = "terraform"
+  }
+
+  lifecycle {
+    # Ignore thumbprint changes as GitHub may rotate certificates
+    ignore_changes = [thumbprint_list]
   }
 }
 

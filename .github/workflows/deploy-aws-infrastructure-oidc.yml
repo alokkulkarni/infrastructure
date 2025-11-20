@@ -154,6 +154,13 @@ jobs:
         working-directory: AWS/terraform
         run: terraform init
 
+      - name: Import existing OIDC provider if present
+        working-directory: AWS
+        run: |
+          chmod +x scripts/import-existing-oidc.sh
+          cd terraform
+          ../scripts/import-existing-oidc.sh
+
       - name: Terraform Validate
         working-directory: AWS/terraform
         run: terraform validate
@@ -248,6 +255,13 @@ jobs:
       - name: Terraform Init
         working-directory: AWS/terraform
         run: terraform init
+
+      - name: Import existing OIDC provider if present
+        working-directory: AWS
+        run: |
+          chmod +x scripts/import-existing-oidc.sh
+          cd terraform
+          ../scripts/import-existing-oidc.sh
 
       - name: Download plan
         uses: actions/download-artifact@v4
