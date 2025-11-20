@@ -47,7 +47,7 @@ jobs:
 
       - name: Setup Terraform backend
         id: backend
-        working-directory: infrastructure/AWS
+        working-directory: AWS
         run: |
           chmod +x scripts/setup-terraform-backend.sh
           export AWS_REGION=${{ env.AWS_REGION }}
@@ -119,7 +119,7 @@ jobs:
           role-session-name: GitHubActions-TerraformPlan
 
       - name: Create terraform.tfvars
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > terraform.tfvars <<EOF
           aws_region        = "${{ env.AWS_REGION }}"
@@ -139,7 +139,7 @@ jobs:
           EOF
 
       - name: Update backend configuration
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > backend.tf <<EOF
           terraform {
@@ -154,19 +154,19 @@ jobs:
           EOF
 
       - name: Terraform Init
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: terraform init
 
       - name: Terraform Validate
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: terraform validate
 
       - name: Terraform Format Check
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: terraform fmt -check -recursive || true
 
       - name: Terraform Plan
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         env:
           TF_VAR_github_runner_token: ${{ needs.generate-runner-token.outputs.runner_token }}
         run: |
@@ -178,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ env.ENVIRONMENT }}
-          path: infrastructure/AWS/terraform/tfplan
+          path: AWS/terraform/tfplan
           retention-days: 5
 
   terraform-apply:
@@ -208,7 +208,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Create terraform.tfvars
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > terraform.tfvars <<EOF
           aws_region        = "${{ env.AWS_REGION }}"
@@ -228,7 +228,7 @@ jobs:
           EOF
 
       - name: Update backend configuration
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > backend.tf <<EOF
           terraform {
@@ -243,17 +243,17 @@ jobs:
           EOF
 
       - name: Terraform Init
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: terraform init
 
       - name: Download plan
         uses: actions/download-artifact@v4
         with:
           name: tfplan-${{ env.ENVIRONMENT }}
-          path: infrastructure/AWS/terraform/
+          path: AWS/terraform/
 
       - name: Terraform Apply
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         env:
           TF_VAR_github_runner_token: ${{ needs.generate-runner-token.outputs.runner_token }}
         run: |
@@ -263,7 +263,7 @@ jobs:
             tfplan
 
       - name: Terraform Output
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -271,7 +271,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Save outputs to artifacts
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           terraform output -json > outputs.json
 
@@ -279,5 +279,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-outputs-${{ env.ENVIRONMENT }}
-          path: infrastructure/AWS/terraform/outputs.json
+          path: AWS/terraform/outputs.json
           retention-days: 30

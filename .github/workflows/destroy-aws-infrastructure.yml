@@ -100,7 +100,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Create terraform.tfvars
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > terraform.tfvars <<EOF
           aws_region        = "${{ env.AWS_REGION }}"
@@ -120,7 +120,7 @@ jobs:
           EOF
 
       - name: Update backend configuration
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           cat > backend.tf <<EOF
           terraform {
@@ -135,25 +135,25 @@ jobs:
           EOF
 
       - name: Terraform Init
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: terraform init
 
       - name: Terraform Plan Destroy
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         env:
           TF_VAR_github_runner_token: "dummy-token-for-destroy"
         run: |
           terraform plan -destroy -out=destroy-plan -input=false
 
       - name: Terraform Destroy
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         env:
           TF_VAR_github_runner_token: "dummy-token-for-destroy"
         run: |
           terraform destroy -auto-approve -input=false
 
       - name: Verify Destruction
-        working-directory: infrastructure/AWS/terraform
+        working-directory: AWS/terraform
         run: |
           echo "## Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
           echo "Environment: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY

@@ -95,7 +95,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Update backend configuration
-        working-directory: infrastructure/Azure/terraform
+        working-directory: Azure/terraform
         run: |
           cat > backend.tf <<EOF
           terraform {
@@ -109,7 +109,7 @@ jobs:
           EOF
 
       - name: Terraform Init
-        working-directory: infrastructure/Azure/terraform
+        working-directory: Azure/terraform
         run: terraform init
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -118,7 +118,7 @@ jobs:
           ARM_USE_OIDC: true
 
       - name: Terraform Destroy
-        working-directory: infrastructure/Azure/terraform
+        working-directory: Azure/terraform
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
