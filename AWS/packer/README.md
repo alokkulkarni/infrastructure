@@ -69,7 +69,38 @@ Your AWS user/role needs permissions to:
 
 ## Building the AMI
 
-### Method 1: Using the Build Script (Recommended)
+### Method 1: GitHub Actions (Recommended for Team/CI)
+
+Build the AMI using the automated GitHub Actions workflow:
+
+1. **Navigate to Actions** in your GitHub repository
+2. **Select** "Build Custom AMI" workflow
+3. **Click** "Run workflow"
+4. **Configure** (optional):
+   - AWS Region (default: eu-west-2)
+   - Instance Type (default: t3.medium)
+   - Force Rebuild (if recent AMI exists)
+5. **Wait** ~15-20 minutes for build
+6. **Copy AMI ID** from workflow summary
+
+**Benefits:**
+- ✅ No local setup required
+- ✅ Consistent build environment  
+- ✅ Uses OIDC authentication (no credentials in workflow)
+- ✅ Automatic AMI verification test
+- ✅ Saves build artifacts (manifest, logs)
+- ✅ Detects recent AMIs (prevents duplicate builds)
+
+**Workflow Output:**
+```
+## ✅ AMI Build Complete
+
+**AMI ID:** `ami-0123456789abcdef`
+**AMI Name:** `github-runner-ubuntu-22.04-20251120150030`
+**Region:** eu-west-2
+```
+
+### Method 2: Using the Build Script (For Local Development)
 
 ```bash
 cd AWS/packer

@@ -21,6 +21,16 @@ on:
         description: 'Environment Tag (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM) - Used for resource isolation and state management. Example: SIT-john-teamA-20251120-1430'
         required: true
         type: string
+      ami_id:
+        description: 'Custom AMI ID (leave empty to use default Ubuntu AMI)'
+        required: false
+        default: ''
+        type: string
+      use_custom_ami:
+        description: 'Use custom pre-built AMI (faster startup, more reliable)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   TF_VERSION: '1.6.0'
@@ -142,6 +152,10 @@ jobs:
           github_repo_url      = "https://github.com/${{ github.repository }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
+          
+          # Custom AMI Configuration
+          ami_id         = "${{ github.event.inputs.ami_id }}"
+          use_custom_ami = ${{ github.event.inputs.use_custom_ami }}
           EOF
 
       - name: Update backend configuration
@@ -232,6 +246,10 @@ jobs:
           github_repo_url      = "https://github.com/${{ github.repository }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
+          
+          # Custom AMI Configuration
+          ami_id         = "${{ github.event.inputs.ami_id }}"
+          use_custom_ami = ${{ github.event.inputs.use_custom_ami }}
           EOF
 
       - name: Update backend configuration

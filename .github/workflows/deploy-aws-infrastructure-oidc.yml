@@ -26,6 +26,16 @@ on:
         required: false
         default: 'alokkulkarni/sit-test-repo'
         type: string
+      ami_id:
+        description: 'Custom AMI ID (leave empty to use default Ubuntu AMI)'
+        required: false
+        default: ''
+        type: string
+      use_custom_ami:
+        description: 'Use custom pre-built AMI (faster startup, more reliable)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   TF_VERSION: '1.6.0'
@@ -185,6 +195,10 @@ jobs:
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
+          # Custom AMI Configuration
+          ami_id         = "${{ github.event.inputs.ami_id }}"
+          use_custom_ami = ${{ github.event.inputs.use_custom_ami }}
+          
           # OIDC Configuration (backend resource names derived from setup-backend job)
           github_org             = "${{ github.repository_owner }}"
           github_repo            = "${{ github.event.repository.name }}"
@@ -311,6 +325,10 @@ jobs:
           github_runner_token  = "${{ needs.generate-runner-token.outputs.runner_token }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
+          
+          # Custom AMI Configuration
+          ami_id         = "${{ github.event.inputs.ami_id }}"
+          use_custom_ami = ${{ github.event.inputs.use_custom_ami }}
           
           # OIDC Configuration (backend resource names derived from setup-backend job)
           github_org             = "${{ github.repository_owner }}"

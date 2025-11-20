@@ -1,0 +1,334 @@
+name: Build Custom AMI
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: 'AWS Region to build AMI'
+        required: true
+        default: 'eu-west-2'
+        type: choice
+        options:
+          - eu-west-2
+          - us-east-1
+          - us-west-2
+          - eu-west-1
+          - ap-southeast-1
+      instance_type:
+        description: 'Instance type for AMI build'
+        required: false
+        default: 't3.medium'
+        type: string
+      force_rebuild:
+        description: 'Force rebuild even if recent AMI exists'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PACKER_VERSION: '1.10.0'
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'eu-west-2' }}
+
+jobs:
+  build-ami:
+    name: Build GitHub Runner AMI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    outputs:
+      ami_id: ${{ steps.build.outputs.ami_id }}
+      ami_name: ${{ steps.build.outputs.ami_name }}
+      ami_region: ${{ env.AWS_REGION }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-PackerBuild
+          role-duration-seconds: 28800  # 8 hours for long build
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Check for recent AMI
+        id: check-ami
+        if: github.event.inputs.force_rebuild == 'false'
+        working-directory: AWS/packer
+        continue-on-error: true
+        run: |
+          echo "Checking for existing AMIs in the last 7 days..."
+          SEVEN_DAYS_AGO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%S.000Z)
+          
+          EXISTING_AMI=$(aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=github-runner-ubuntu-22.04-*" \
+            --query "Images[?CreationDate>='${SEVEN_DAYS_AGO}'] | sort_by(@, &CreationDate) | [-1].{ID:ImageId,Name:Name,Date:CreationDate}" \
+            --output json)
+          
+          if [ "$EXISTING_AMI" != "null" ] && [ -n "$EXISTING_AMI" ]; then
+            AMI_ID=$(echo "$EXISTING_AMI" | jq -r '.ID // empty')
+            if [ -n "$AMI_ID" ] && [ "$AMI_ID" != "null" ]; then
+              echo "recent_ami_found=true" >> $GITHUB_OUTPUT
+              echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+              echo "ami_info=$EXISTING_AMI" >> $GITHUB_OUTPUT
+              
+              echo "## ⚠️ Recent AMI Found" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Found an AMI built within the last 7 days:" >> $GITHUB_STEP_SUMMARY
+              echo '```json' >> $GITHUB_STEP_SUMMARY
+              echo "$EXISTING_AMI" | jq '.' >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Skipping build. Set 'force_rebuild=true' to build anyway." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "recent_ami_found=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "recent_ami_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip build if recent AMI exists
+        if: steps.check-ami.outputs.recent_ami_found == 'true'
+        run: |
+          echo "## ✅ Using Existing AMI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**AMI ID:** ${{ steps.check-ami.outputs.ami_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To force a rebuild, re-run this workflow with 'force_rebuild=true'" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
+      - name: Initialize Packer
+        if: steps.check-ami.outputs.recent_ami_found != 'true'
+        working-directory: AWS/packer
+        run: |
+          echo "Initializing Packer and downloading plugins..."
+          packer init github-runner-ami.pkr.hcl
+
+      - name: Validate Packer configuration
+        if: steps.check-ami.outputs.recent_ami_found != 'true'
+        working-directory: AWS/packer
+        run: |
+          echo "Validating Packer configuration..."
+          packer validate \
+            -var "region=${{ env.AWS_REGION }}" \
+            -var "instance_type=${{ github.event.inputs.instance_type }}" \
+            github-runner-ami.pkr.hcl
+
+      - name: Build AMI with Packer
+        id: build
+        if: steps.check-ami.outputs.recent_ami_found != 'true'
+        working-directory: AWS/packer
+        run: |
+          echo "## 🚀 Building Custom AMI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Instance Type:** ${{ github.event.inputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Started:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "Starting Packer build..."
+          packer build \
+            -var "region=${{ env.AWS_REGION }}" \
+            -var "instance_type=${{ github.event.inputs.instance_type }}" \
+            -color=false \
+            github-runner-ami.pkr.hcl | tee packer-build.log
+          
+          # Extract AMI ID from manifest
+          if [ -f "manifest.json" ]; then
+            AMI_ID=$(jq -r '.builds[0].artifact_id' manifest.json | cut -d: -f2)
+            AMI_NAME=$(jq -r '.builds[0].custom_data.ami_name // .builds[0].name' manifest.json)
+            
+            echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+            echo "ami_name=$AMI_NAME" >> $GITHUB_OUTPUT
+            
+            # Save to file for easy reference
+            echo "$AMI_ID" > latest-ami-id.txt
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ✅ AMI Build Complete" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**AMI ID:** \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+            echo "**AMI Name:** \`$AMI_NAME\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Completed:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📋 How to Use This AMI" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. **Via Workflow Inputs:**" >> $GITHUB_STEP_SUMMARY
+            echo "   - Go to 'Deploy AWS Infrastructure' workflow" >> $GITHUB_STEP_SUMMARY
+            echo "   - Set \`ami_id\` input to: \`$AMI_ID\`" >> $GITHUB_STEP_SUMMARY
+            echo "   - Set \`use_custom_ami\` to: \`true\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "2. **Via terraform.tfvars:**" >> $GITHUB_STEP_SUMMARY
+            echo '   ```hcl' >> $GITHUB_STEP_SUMMARY
+            echo "   ami_id         = \"$AMI_ID\"" >> $GITHUB_STEP_SUMMARY
+            echo "   use_custom_ami = true" >> $GITHUB_STEP_SUMMARY
+            echo '   ```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "3. **Via Terraform CLI:**" >> $GITHUB_STEP_SUMMARY
+            echo '   ```bash' >> $GITHUB_STEP_SUMMARY
+            echo "   terraform apply -var=\"ami_id=$AMI_ID\" -var=\"use_custom_ami=true\"" >> $GITHUB_STEP_SUMMARY
+            echo '   ```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Error: manifest.json not found" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Tag AMI with metadata
+        if: steps.build.outputs.ami_id != '' && steps.check-ami.outputs.recent_ami_found != 'true'
+        run: |
+          aws ec2 create-tags \
+            --resources ${{ steps.build.outputs.ami_id }} \
+            --tags \
+              Key=GitHubWorkflow,Value=${{ github.workflow }} \
+              Key=GitHubRunId,Value=${{ github.run_id }} \
+              Key=GitHubRunNumber,Value=${{ github.run_number }} \
+              Key=GitHubActor,Value=${{ github.actor }} \
+              Key=BuildDate,Value=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+              Key=ManagedBy,Value=Packer
+
+      - name: Verify AMI
+        if: steps.build.outputs.ami_id != '' && steps.check-ami.outputs.recent_ami_found != 'true'
+        run: |
+          echo "Verifying AMI availability..."
+          aws ec2 describe-images \
+            --image-ids ${{ steps.build.outputs.ami_id }} \
+            --query 'Images[0].[ImageId,Name,State,CreationDate]' \
+            --output table
+
+      - name: Upload Packer artifacts
+        if: steps.check-ami.outputs.recent_ami_found != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ami-build-artifacts-${{ env.AWS_REGION }}
+          path: |
+            AWS/packer/manifest.json
+            AWS/packer/latest-ami-id.txt
+            AWS/packer/packer-build.log
+          retention-days: 90
+
+      - name: Output AMI ID for workflows
+        id: output
+        run: |
+          if [ "${{ steps.check-ami.outputs.recent_ami_found }}" == "true" ]; then
+            echo "ami_id=${{ steps.check-ami.outputs.ami_id }}" >> $GITHUB_OUTPUT
+          else
+            echo "ami_id=${{ steps.build.outputs.ami_id }}" >> $GITHUB_OUTPUT
+          fi
+
+  test-ami:
+    name: Test AMI (Launch & Verify)
+    runs-on: ubuntu-latest
+    needs: build-ami
+    if: needs.build-ami.outputs.ami_id != ''
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-AMITest
+
+      - name: Launch test instance
+        id: test-instance
+        run: |
+          echo "Launching test instance from AMI ${{ needs.build-ami.outputs.ami_id }}..."
+          
+          # Get default VPC
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query 'Vpcs[0].VpcId' --output text)
+          
+          # Get a subnet in the default VPC
+          SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
+          
+          # Launch instance
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id ${{ needs.build-ami.outputs.ami_id }} \
+            --instance-type t3.micro \
+            --subnet-id $SUBNET_ID \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=ami-test-${{ github.run_id }}},{Key=Purpose,Value=AMI-Testing},{Key=GitHubRunId,Value=${{ github.run_id }}}]" \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+          
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Test instance launched: $INSTANCE_ID"
+          
+          # Wait for instance to be running
+          echo "Waiting for instance to reach running state..."
+          aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+          echo "Instance is running"
+
+      - name: Verify instance health
+        run: |
+          echo "Waiting for instance status checks..."
+          sleep 60
+          
+          STATUS=$(aws ec2 describe-instance-status \
+            --instance-ids ${{ steps.test-instance.outputs.instance_id }} \
+            --query 'InstanceStatuses[0].InstanceStatus.Status' \
+            --output text)
+          
+          echo "Instance status: $STATUS"
+          
+          echo "## 🧪 AMI Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**AMI ID:** ${{ needs.build-ami.outputs.ami_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Instance:** ${{ steps.test-instance.outputs.instance_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** $STATUS" >> $GITHUB_STEP_SUMMARY
+
+      - name: Terminate test instance
+        if: always()
+        run: |
+          if [ -n "${{ steps.test-instance.outputs.instance_id }}" ]; then
+            echo "Terminating test instance..."
+            aws ec2 terminate-instances --instance-ids ${{ steps.test-instance.outputs.instance_id }}
+            echo "Test instance terminated"
+          fi
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-ami, test-ami]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 📦 Custom AMI Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ needs.build-ami.outputs.ami_id }}" ]; then
+            echo "### ✅ Success" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**AMI ID:** \`${{ needs.build-ami.outputs.ami_id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**AMI Name:** \`${{ needs.build-ami.outputs.ami_name }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Use this AMI in your deployments by providing these inputs:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ami_id\`: \`${{ needs.build-ami.outputs.ami_id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`use_custom_ami\`: \`true\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -29,10 +29,11 @@ variable "ssh_username" {
 
 locals {
   timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  ami_name  = "${var.ami_name_prefix}-${local.timestamp}"
 }
 
 source "amazon-ebs" "ubuntu" {
-  ami_name      = "${var.ami_name_prefix}-${local.timestamp}"
+  ami_name      = local.ami_name
   instance_type = var.instance_type
   region        = var.region
   
@@ -300,6 +301,7 @@ build {
     strip_path = true
     custom_data = {
       ami_region    = var.region
+      ami_name      = local.ami_name
       instance_type = var.instance_type
       build_time    = local.timestamp
     }
