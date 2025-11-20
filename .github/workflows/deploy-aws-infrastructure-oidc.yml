@@ -171,8 +171,14 @@ jobs:
         working-directory: AWS/terraform
         run: terraform init
 
-      # OIDC provider and GitHub Actions role are managed manually, not by Terraform
-      # No import needed since module is commented out
+      - name: Verify OIDC resources exist (read-only check)
+        working-directory: AWS
+        env:
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          chmod +x scripts/import-existing-oidc.sh
+          cd terraform
+          ../scripts/import-existing-oidc.sh
 
       - name: Import existing EC2 IAM role if present
         working-directory: AWS

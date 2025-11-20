@@ -1,14 +1,20 @@
 #!/bin/bash
-# Script to import existing GitHub OIDC provider and IAM role into Terraform state
-# This prevents "EntityAlreadyExists" errors when resources were created manually
+# Script to check for existing GitHub OIDC provider and IAM role
+# These resources are managed manually and NOT by Terraform
+# This script only verifies they exist, it does NOT import them
 
 set -e
 
 OIDC_URL="token.actions.githubusercontent.com"
 
 echo "=========================================="
-echo "Checking for existing OIDC resources"
+echo "Verifying OIDC resources (read-only check)"
 echo "=========================================="
+echo ""
+echo "NOTE: OIDC provider and GitHub Actions role are managed manually."
+echo "      Terraform will NOT create, modify, or import these resources."
+echo "      This script only verifies they exist for the workflows to use."
+echo ""
 
 # Get AWS account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -21,23 +27,11 @@ echo ""
 # Check if OIDC provider exists in AWS
 echo "Checking if OIDC provider exists in AWS..."
 if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" &>/dev/null; then
-    echo "✓ OIDC provider exists in AWS"
-    
-    # Check if it's already in Terraform state
-    echo "Checking Terraform state..."
-    if terraform state list 2>/dev/null | grep -q "module.iam_oidc.aws_iam_openid_connect_provider.github"; then
-        echo "✓ OIDC provider already in Terraform state"
-    else
-        echo "⚠ OIDC provider exists in AWS but not in Terraform state"
-        echo "Importing OIDC provider into Terraform state..."
-        
-        # Import the existing OIDC provider
-        terraform import "module.iam_oidc.aws_iam_openid_connect_provider.github" "$OIDC_ARN"
-        
-        echo "✓ OIDC provider imported successfully"
-    fi
+    echo "✓ OIDC provider exists in AWS (managed manually)"
 else
-    echo "✓ OIDC provider does not exist in AWS (will be created by Terraform)"
+    echo "❌ ERROR: OIDC provider does not exist in AWS!"
+    echo "   Please create it manually using the OIDC_GUIDE.md"
+    exit 1
 fi
 
 echo ""
@@ -45,13 +39,8 @@ echo "====================================="
 echo "Checking for existing IAM role"
 echo "====================================="
 
-# Get environment from terraform.tfvars or use dev as default
-if [ -f "terraform.tfvars" ]; then
-    ENVIRONMENT=$(grep -E '^environment[[:space:]]*=' terraform.tfvars | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "dev")
-else
-    ENVIRONMENT="dev"
-fi
-
+# Get environment from environment variable or use dev as default
+ENVIRONMENT="${ENVIRONMENT:-dev}"
 ROLE_NAME="testcontainers-${ENVIRONMENT}-github-actions-role"
 
 echo "Environment: $ENVIRONMENT"
@@ -61,26 +50,29 @@ echo ""
 # Check if IAM role exists in AWS
 echo "Checking if IAM role exists in AWS..."
 if aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
-    echo "✓ IAM role exists in AWS"
+    echo "✓ IAM role exists in AWS (managed manually)"
     
-    # Check if it's already in Terraform state
-    echo "Checking Terraform state..."
-    if terraform state list 2>/dev/null | grep -q "module.iam_oidc.aws_iam_role.github_actions"; then
-        echo "✓ IAM role already in Terraform state"
+    # Check trust policy
+    echo ""
+    echo "Verifying trust policy allows GitHub Actions..."
+    TRUST_POLICY=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument' --output json)
+    if echo "$TRUST_POLICY" | grep -q "token.actions.githubusercontent.com"; then
+        echo "✓ Trust policy includes GitHub OIDC provider"
     else
-        echo "⚠ IAM role exists in AWS but not in Terraform state"
-        echo "Importing IAM role into Terraform state..."
-        
-        # Import the existing IAM role
-        terraform import "module.iam_oidc.aws_iam_role.github_actions" "$ROLE_NAME"
-        
-        echo "✓ IAM role imported successfully"
+        echo "⚠️  WARNING: Trust policy may not be configured for GitHub OIDC"
     fi
 else
-    echo "✓ IAM role does not exist in AWS (will be created by Terraform)"
+    echo "❌ ERROR: IAM role does not exist in AWS!"
+    echo "   Please create it manually using the OIDC_GUIDE.md"
+    exit 1
 fi
 
 echo ""
 echo "=========================================="
-echo "OIDC resources check completed"
+echo "✓ All OIDC resources verified successfully"
 echo "=========================================="
+echo ""
+echo "Terraform will use data sources to reference these resources."
+echo "No imports or modifications will be performed."
+echo ""
+
