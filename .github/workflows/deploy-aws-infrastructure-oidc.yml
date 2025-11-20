@@ -92,12 +92,21 @@ jobs:
             const runnerRepo = '${{ github.event.inputs.runner_repository }}';
             const [owner, repo] = runnerRepo.split('/');
             
-            const response = await github.rest.actions.createRegistrationTokenForRepo({
-              owner: owner,
-              repo: repo
-            });
-            core.setOutput('token', response.data.token);
-            core.setSecret(response.data.token);
+            console.log(`Generating runner token for repository: ${owner}/${repo}`);
+            
+            try {
+              const response = await github.rest.actions.createRegistrationTokenForRepo({
+                owner: owner,
+                repo: repo
+              });
+              console.log('✅ Runner token generated successfully');
+              core.setOutput('token', response.data.token);
+              core.setSecret(response.data.token);
+            } catch (error) {
+              console.error('❌ Failed to generate runner token:', error.message);
+              core.setFailed(`Token generation failed: ${error.message}`);
+              throw error;
+            }
 
   terraform-plan:
     name: Terraform Plan
