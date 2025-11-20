@@ -15,6 +15,11 @@ echo "Starting EC2 Instance Setup"
 echo "======================================"
 echo "Timestamp: $(date)"
 
+# Disable IPv6 to prevent apt from trying IPv6 connections through NAT Gateway
+echo "Disabling IPv6 for package installation..."
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
+
 # Update system
 echo "Updating system packages..."
 apt-get update -y
