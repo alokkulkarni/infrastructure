@@ -194,6 +194,7 @@ jobs:
         env:
           PROJECT_NAME: testcontainers
           ENVIRONMENT: ${{ env.ENVIRONMENT }}
+          ENVIRONMENT_TAG: ${{ env.ENVIRONMENT_TAG }}
         run: |
           chmod +x scripts/import-existing-ec2-role.sh
           cd terraform

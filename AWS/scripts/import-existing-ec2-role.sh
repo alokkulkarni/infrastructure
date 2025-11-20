@@ -7,10 +7,17 @@ set -e
 
 echo "🔍 Checking for existing EC2 IAM role..."
 
-# Get project name and environment from terraform variables
+# Get project name, environment, and environment tag from terraform variables
 PROJECT_NAME="${PROJECT_NAME:-testcontainers}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
-ROLE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ec2-role"
+ENVIRONMENT_TAG="${ENVIRONMENT_TAG:-}"
+
+# Build role name with environment tag if provided
+if [ -n "$ENVIRONMENT_TAG" ]; then
+    ROLE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-${ENVIRONMENT_TAG}-ec2-role"
+else
+    ROLE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ec2-role"
+fi
 
 echo "Looking for role: $ROLE_NAME"
 
@@ -30,7 +37,11 @@ if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
     fi
     
     # Also check and import instance profile if needed
-    PROFILE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ec2-profile"
+    if [ -n "$ENVIRONMENT_TAG" ]; then
+        PROFILE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-${ENVIRONMENT_TAG}-ec2-profile"
+    else
+        PROFILE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ec2-profile"
+    fi
     if aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1; then
         echo "✅ Instance profile exists: $PROFILE_NAME"
         if ! terraform state list | grep -q "module.ec2.aws_iam_instance_profile.ec2"; then
