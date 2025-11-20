@@ -16,7 +16,7 @@ data "aws_ami" "ubuntu" {
 
 # IAM Role for EC2
 resource "aws_iam_role" "ec2" {
-  name = "${var.project_name}-${var.environment}-ec2-role"
+  name = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -32,18 +32,15 @@ resource "aws_iam_role" "ec2" {
   })
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-ec2-role"
-  }
-
-  lifecycle {
-    # Allow import of existing role
-    ignore_changes = [assume_role_policy]
+    Name                = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-role"
+    Environment         = var.environment
+    EnvironmentTag      = var.environment_tag
   }
 }
 
 # IAM Policy for EC2 (ECR, S3, CloudWatch)
 resource "aws_iam_role_policy" "ec2" {
-  name = "${var.project_name}-${var.environment}-ec2-policy"
+  name = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-policy"
   role = aws_iam_role.ec2.id
 
   policy = jsonencode({
@@ -70,8 +67,14 @@ resource "aws_iam_role_policy" "ec2" {
 
 # IAM Instance Profile
 resource "aws_iam_instance_profile" "ec2" {
-  name = "${var.project_name}-${var.environment}-ec2-profile"
+  name = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-profile"
   role = aws_iam_role.ec2.name
+  
+  tags = {
+    Name           = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-profile"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+  }
 }
 
 # User Data Script
