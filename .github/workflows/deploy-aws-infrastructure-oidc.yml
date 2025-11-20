@@ -92,18 +92,48 @@ jobs:
             const runnerRepo = '${{ github.event.inputs.runner_repository }}';
             const [owner, repo] = runnerRepo.split('/');
             
-            console.log(`Generating runner token for repository: ${owner}/${repo}`);
+            console.log('========================================');
+            console.log('🔐 Generating GitHub Runner Registration Token');
+            console.log('========================================');
+            console.log(`📦 Target Repository: ${owner}/${repo}`);
+            console.log(`🏗️  Current Workflow Repository: ${{ github.repository }}`);
+            console.log(`🔖 Environment Tag: ${{ env.ENVIRONMENT_TAG }}`);
+            console.log(`🌍 Environment: ${{ env.ENVIRONMENT }}`);
+            console.log('========================================');
             
             try {
+              console.log(`📡 Calling GitHub API to create registration token...`);
               const response = await github.rest.actions.createRegistrationTokenForRepo({
                 owner: owner,
                 repo: repo
               });
+              
               console.log('✅ Runner token generated successfully');
+              console.log(`📅 Token expires at: ${response.data.expires_at}`);
+              console.log(`🔑 Token length: ${response.data.token.length} characters`);
+              console.log('========================================');
+              
               core.setOutput('token', response.data.token);
               core.setSecret(response.data.token);
+              
+              console.log('✅ Token set as output and marked as secret');
+              console.log('========================================');
             } catch (error) {
-              console.error('❌ Failed to generate runner token:', error.message);
+              console.error('========================================');
+              console.error('❌ Failed to generate runner token');
+              console.error('========================================');
+              console.error(`Error Type: ${error.constructor.name}`);
+              console.error(`Error Message: ${error.message}`);
+              console.error(`Status Code: ${error.status || 'N/A'}`);
+              if (error.response) {
+                console.error(`Response: ${JSON.stringify(error.response.data, null, 2)}`);
+              }
+              console.error('========================================');
+              console.error('Troubleshooting:');
+              console.error('1. Verify PAT_TOKEN has "repo" and "workflow" scopes');
+              console.error('2. Verify PAT_TOKEN has access to the target repository');
+              console.error('3. Check if the target repository exists and is accessible');
+              console.error('========================================');
               core.setFailed(`Token generation failed: ${error.message}`);
               throw error;
             }
