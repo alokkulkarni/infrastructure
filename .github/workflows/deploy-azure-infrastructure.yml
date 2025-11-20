@@ -27,6 +27,9 @@ jobs:
   setup-backend:
     name: Setup Terraform Backend
     runs-on: ubuntu-latest
+    outputs:
+      backend_resource_group: ${{ steps.backend.outputs.backend_resource_group }}
+      backend_storage_account: ${{ steps.backend.outputs.backend_storage_account }}
     permissions:
       id-token: write   # Required for OIDC
       contents: read
@@ -43,13 +46,23 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Terraform backend
+        id: backend
         working-directory: infrastructure/Azure
         run: |
           chmod +x scripts/setup-terraform-backend.sh
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
-          export RESOURCE_GROUP_NAME="${{ secrets.TERRAFORM_STATE_RG }}"
-          export STORAGE_ACCOUNT_NAME="${{ secrets.TERRAFORM_STATE_STORAGE }}"
-          ./scripts/setup-terraform-backend.sh
+          export PROJECT_NAME=testcontainers
+          
+          # Run setup script and capture outputs
+          SETUP_OUTPUT=$(./scripts/setup-terraform-backend.sh)
+          echo "$SETUP_OUTPUT"
+          
+          # Extract and set outputs for other jobs
+          BACKEND_RG=$(echo "$SETUP_OUTPUT" | grep "export TF_BACKEND_RESOURCE_GROUP" | cut -d'"' -f2)
+          BACKEND_SA=$(echo "$SETUP_OUTPUT" | grep "export TF_BACKEND_STORAGE_ACCOUNT" | cut -d'"' -f2)
+          
+          echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
+          echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
 
   generate-runner-token:
     name: Generate GitHub Runner Token
@@ -75,7 +88,7 @@ jobs:
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: generate-runner-token
+    needs: [setup-backend, generate-runner-token]
     permissions:
       id-token: write       # Required for OIDC
       contents: read
@@ -127,8 +140,8 @@ jobs:
           cat > backend.tf <<EOF
           terraform {
             backend "azurerm" {
-              resource_group_name  = "${{ secrets.TERRAFORM_STATE_RG }}"
-              storage_account_name = "${{ secrets.TERRAFORM_STATE_STORAGE }}"
+              resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
+              storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
               key                  = "azure/${{ env.ENVIRONMENT }}/terraform.tfstate"
             }
@@ -175,7 +188,7 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: [generate-runner-token, terraform-plan]
+    needs: [setup-backend, generate-runner-token, terraform-plan]
     permissions:
       id-token: write   # Required for OIDC
       contents: read
@@ -228,8 +241,8 @@ jobs:
           cat > backend.tf <<EOF
           terraform {
             backend "azurerm" {
-              resource_group_name  = "${{ secrets.TERRAFORM_STATE_RG }}"
-              storage_account_name = "${{ secrets.TERRAFORM_STATE_STORAGE }}"
+              resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
+              storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
               key                  = "azure/${{ env.ENVIRONMENT }}/terraform.tfstate"
             }

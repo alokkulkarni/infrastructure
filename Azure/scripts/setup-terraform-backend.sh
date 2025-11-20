@@ -16,16 +16,20 @@ if [ -z "$AZURE_LOCATION" ]; then
     exit 1
 fi
 
-if [ -z "$RESOURCE_GROUP_NAME" ]; then
-    echo -e "${RED}Error: RESOURCE_GROUP_NAME environment variable is not set${NC}"
+# Get Azure Subscription ID for unique naming
+AZURE_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+    echo -e "${RED}Error: Unable to retrieve Azure Subscription ID${NC}"
     exit 1
 fi
 
-if [ -z "$STORAGE_ACCOUNT_NAME" ]; then
-    echo -e "${RED}Error: STORAGE_ACCOUNT_NAME environment variable is not set${NC}"
-    exit 1
-fi
-
+# Derive resource names dynamically
+PROJECT_NAME="${PROJECT_NAME:-testcontainers}"
+# Storage account names must be 3-24 characters, lowercase letters and numbers only
+# Using first 8 chars of subscription ID to ensure uniqueness
+SUBSCRIPTION_SHORT=$(echo "$AZURE_SUBSCRIPTION_ID" | tr -d '-' | cut -c1-8)
+RESOURCE_GROUP_NAME="${PROJECT_NAME}-tfstate-rg"
+STORAGE_ACCOUNT_NAME="${PROJECT_NAME}tfstate${SUBSCRIPTION_SHORT}"
 CONTAINER_NAME="tfstate"
 
 echo -e "${YELLOW}Configuration:${NC}"
@@ -102,3 +106,8 @@ echo "  resource_group_name  = \"$RESOURCE_GROUP_NAME\""
 echo "  storage_account_name = \"$STORAGE_ACCOUNT_NAME\""
 echo "  container_name       = \"$CONTAINER_NAME\""
 echo "  key                  = \"azure/ENV/terraform.tfstate\""
+echo ""
+
+# Export for GitHub Actions workflow consumption
+echo "export TF_BACKEND_RESOURCE_GROUP=\"$RESOURCE_GROUP_NAME\""
+echo "export TF_BACKEND_STORAGE_ACCOUNT=\"$STORAGE_ACCOUNT_NAME\""

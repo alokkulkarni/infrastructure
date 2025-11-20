@@ -218,13 +218,13 @@ ARM_USE_OIDC: true  # ✅ Enables OIDC authentication
 
 **Required Secrets:**
 | Secret | Description | Example |
-|--------|-------------|---------|
+|--------|-------------|---------||
 | `AZURE_CLIENT_ID` | Service Principal Application (client) ID | `12345678-1234-1234-1234-123456789012` |
 | `AZURE_TENANT_ID` | Microsoft Entra ID Tenant ID | `87654321-4321-4321-4321-210987654321` |
 | `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID | `abcdef12-3456-7890-abcd-ef1234567890` |
 | `PAT_TOKEN` | GitHub Personal Access Token | `ghp_xxxxxxxxxxxxx` |
-| `TERRAFORM_STATE_RG` | Resource group for Terraform state storage | `terraform-state-rg` |
-| `TERRAFORM_STATE_STORAGE` | Storage account for Terraform state | `tfstatexxxxx` |
+
+**Note:** Terraform backend resources (Resource Group and Storage Account) are automatically created with names derived from your Azure Subscription ID. No secrets required for backend configuration.
 
 **When to use:**
 - Azure-based infrastructure deployments
@@ -271,8 +271,8 @@ Same as `deploy-azure-infrastructure.yml`:
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
-- `TERRAFORM_STATE_RG`
-- `TERRAFORM_STATE_STORAGE`
+
+**Note:** Terraform backend resources are automatically derived from Azure Subscription ID - no secrets required for backend configuration.
 
 **Safety Features:**
 - ✅ Manual workflow dispatch only
@@ -443,14 +443,42 @@ az ad app federated-credential create \
   }'
 ```
 
-#### 3. Create Terraform Backend Resources
+#### 3. Backend Resource Management (Automatic)
 
+**No manual setup required!** The workflows automatically create and manage backend resources:
+
+**How it works:**
+1. The `setup-backend` job derives unique resource names using your Azure Subscription ID:
+   - Resource Group: `testcontainers-tfstate-rg`
+   - Storage Account: `testcontainerstfstate{SUBSCRIPTION_SHORT}` (first 8 chars of subscription ID)
+   - Container: `tfstate`
+
+2. Backend configuration is dynamically generated in workflows:
+   ```yaml
+   # Generated at runtime - no secrets needed
+   terraform {
+     backend "azurerm" {
+       resource_group_name  = "testcontainers-tfstate-rg"
+       storage_account_name = "testcontainerstfstateabcd1234"
+       container_name       = "tfstate"
+       key                  = "azure/dev/terraform.tfstate"
+     }
+   }
+   ```
+
+**Benefits:**
+- ✅ No secrets required for backend configuration
+- ✅ Globally unique storage account names (using subscription ID)
+- ✅ Idempotent (can run multiple times safely)
+- ✅ Consistent naming across environments
+
+**Manual setup option (optional):**
+If you want to pre-create resources before running workflows:
 ```bash
 cd infrastructure/Azure
 chmod +x scripts/setup-terraform-backend.sh
 export AZURE_LOCATION=eastus
-export RESOURCE_GROUP_NAME=terraform-state-rg
-export STORAGE_ACCOUNT_NAME=tfstatexxxxx  # Globally unique name
+export PROJECT_NAME=testcontainers  # Optional, defaults to "testcontainers"
 ./scripts/setup-terraform-backend.sh
 ```
 
@@ -533,9 +561,13 @@ AZURE_CLIENT_ID=12345678-1234-1234-1234-123456789012
 AZURE_TENANT_ID=87654321-4321-4321-4321-210987654321
 AZURE_SUBSCRIPTION_ID=abcdef12-3456-7890-abcd-ef1234567890
 PAT_TOKEN=ghp_xxxxxxxxxxxxx
-TERRAFORM_STATE_RG=terraform-state-rg
-TERRAFORM_STATE_STORAGE=tfstatexxxxx
 ```
+
+**Note:** Backend resources (Resource Group and Storage Account) are automatically created with names derived from your Azure Subscription ID:
+- Resource Group: `testcontainers-tfstate-rg`
+- Storage Account: `testcontainerstfstate{SUBSCRIPTION_SHORT}`
+
+No secrets required for backend configuration.
 
 ---
 
