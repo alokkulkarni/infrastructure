@@ -150,6 +150,15 @@ jobs:
           }
           EOF
 
+      - name: Fix state checksum if needed
+        working-directory: AWS
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          chmod +x scripts/fix-state-checksum.sh
+          ./scripts/fix-state-checksum.sh
+
       - name: Terraform Init
         working-directory: AWS/terraform
         run: terraform init
@@ -251,6 +260,15 @@ jobs:
             }
           }
           EOF
+
+      - name: Fix state checksum if needed
+        working-directory: AWS
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          chmod +x scripts/fix-state-checksum.sh
+          ./scripts/fix-state-checksum.sh
 
       - name: Terraform Init
         working-directory: AWS/terraform
