@@ -5,6 +5,11 @@ set -e
 exec > >(tee /var/log/user-data.log)
 exec 2>&1
 
+# Define log function for script logging
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
 echo "======================================"
 echo "Starting EC2 Instance Setup"
 echo "======================================"
@@ -364,7 +369,7 @@ reload_nginx() {
 }
 
 # Initialize - generate configs for existing containers
-log "Initializing: Scanning existing containers..."
+echo "Initializing: Scanning existing containers..."
 docker ps --filter "network=app-network" --format '{{.ID}}' | while read container_id; do
     generate_config $container_id
 done
@@ -413,7 +418,7 @@ StandardError=append:/var/log/nginx-auto-config.log
 WantedBy=multi-user.target
 SYSTEMD
 
-log "Nginx automated configuration manager created"
+echo "Nginx automated configuration manager created"
 
 # Run Nginx as a Docker container
 echo "Starting Nginx container..."
