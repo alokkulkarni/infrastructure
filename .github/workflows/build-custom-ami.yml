@@ -53,10 +53,43 @@ jobs:
           role-session-name: GitHubActions-PackerBuild
           role-duration-seconds: 28800  # 8 hours for long build
 
+      - name: Setup Packer IAM resources
+        id: setup-iam
+        working-directory: AWS/packer
+        run: |
+          echo "## 🔐 Setting up IAM resources for SSM" >> $GITHUB_STEP_SUMMARY
+          
+          # Check if stack already exists
+          if aws cloudformation describe-stacks --stack-name packer-ssm-iam-stack --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "IAM stack already exists, skipping creation..." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Creating IAM stack..." >> $GITHUB_STEP_SUMMARY
+            aws cloudformation create-stack \
+              --stack-name packer-ssm-iam-stack \
+              --template-body file://iam-setup.yml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --region ${{ env.AWS_REGION }}
+            
+            echo "Waiting for stack creation to complete..."
+            aws cloudformation wait stack-create-complete \
+              --stack-name packer-ssm-iam-stack \
+              --region ${{ env.AWS_REGION }}
+            
+            echo "✅ IAM stack created successfully" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
         with:
           version: ${{ env.PACKER_VERSION }}
+
+      - name: Install AWS Session Manager Plugin
+        run: |
+          echo "## 🔧 Installing Session Manager Plugin" >> $GITHUB_STEP_SUMMARY
+          curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
+          sudo dpkg -i session-manager-plugin.deb
+          session-manager-plugin --version
+          echo "✅ Session Manager Plugin installed" >> $GITHUB_STEP_SUMMARY
 
       - name: Check for recent AMI
         id: check-ami

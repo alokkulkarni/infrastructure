@@ -2,6 +2,8 @@
 
 This directory contains Packer configuration to build a custom AMI with all required packages pre-installed. This approach eliminates package installation issues during EC2 startup.
 
+> **⚠️ Important**: The GitHub Actions workflow uses **AWS Systems Manager (SSM) Session Manager** instead of SSH for connectivity. See [SSM_CONNECTIVITY_FIX.md](SSM_CONNECTIVITY_FIX.md) for details.
+
 ## Overview
 
 **Problem**: The standard user-data script installs Docker, Nginx, AWS CLI, Node.js, Python, and other packages during EC2 startup, which can fail due to:

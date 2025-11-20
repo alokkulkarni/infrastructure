@@ -49,8 +49,11 @@ source "amazon-ebs" "ubuntu" {
   
   ssh_username = var.ssh_username
   
-  # Use temporary security group and subnet
-  temporary_security_group_source_public_ip = true
+  # Use AWS Systems Manager Session Manager instead of SSH
+  # This avoids network connectivity issues with GitHub Actions runners
+  communicator                        = "ssh"
+  ssh_interface                       = "session_manager"
+  iam_instance_profile                = "PackerSSMInstanceProfile"
   
   # Increased timeout for AMI creation
   aws_polling {

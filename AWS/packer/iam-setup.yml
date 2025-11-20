@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM resources for Packer to use SSM Session Manager'
+
+Resources:
+  # IAM Role for Packer EC2 instances
+  PackerSSMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: PackerSSMRole
+      Description: 'Role for Packer EC2 instances to use SSM Session Manager'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Tags:
+        - Key: Purpose
+          Value: Packer-SSM-Access
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Instance Profile for the role
+  PackerSSMInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: PackerSSMInstanceProfile
+      Roles:
+        - !Ref PackerSSMRole
+
+Outputs:
+  RoleName:
+    Description: 'Name of the IAM Role'
+    Value: !Ref PackerSSMRole
+    Export:
+      Name: PackerSSMRoleName
+  
+  InstanceProfileName:
+    Description: 'Name of the Instance Profile'
+    Value: !Ref PackerSSMInstanceProfile
+    Export:
+      Name: PackerSSMInstanceProfileName
+  
+  InstanceProfileArn:
+    Description: 'ARN of the Instance Profile'
+    Value: !GetAtt PackerSSMInstanceProfile.Arn
+    Export:
+      Name: PackerSSMInstanceProfileArn
