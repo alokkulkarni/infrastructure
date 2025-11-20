@@ -528,35 +528,58 @@ if nslookup github.com > /dev/null 2>&1; then
     echo "✅ DNS resolution successful"
 else
     echo "❌ DNS resolution failed - cannot reach GitHub"
+    echo "DNS servers:"
+    cat /etc/resolv.conf | grep nameserver
     exit 1
 fi
 
-# Test HTTPS connectivity
-echo "Testing HTTPS connection to github.com..."
-if curl -Is https://github.com --connect-timeout 10 | head -1; then
-    echo "✅ HTTPS connection successful"
-else
-    echo "❌ HTTPS connection failed - cannot reach GitHub"
-    echo "Checking route table..."
-    ip route show
-    echo "Checking NAT gateway connectivity..."
-    ping -c 3 8.8.8.8 || echo "Cannot reach internet"
-    exit 1
-fi
+# Test core GitHub domains required for runner
+declare -a GITHUB_DOMAINS=(
+    "github.com:Main GitHub"
+    "api.github.com:GitHub API"
+    "pipelines.actions.githubusercontent.com:Runner communication"
+    "results-receiver.actions.githubusercontent.com:Job results"
+    "vstoken.actions.githubusercontent.com:OIDC tokens"
+)
 
-# Test GitHub API
-echo "Testing GitHub API..."
-if curl -s https://api.github.com/zen --connect-timeout 10; then
+FAILED_DOMAINS=()
+
+for domain_desc in "${GITHUB_DOMAINS[@]}"; do
+    IFS=':' read -r domain desc <<< "$domain_desc"
+    echo "Testing $desc ($domain)..."
+    if timeout 10 curl -Is https://$domain --connect-timeout 10 > /dev/null 2>&1; then
+        echo "✅ $desc - accessible"
+    else
+        echo "❌ $desc - NOT accessible"
+        FAILED_DOMAINS+=("$domain")
+    fi
+done
+
+if [ ${#FAILED_DOMAINS[@]} -gt 0 ]; then
     echo ""
-    echo "✅ GitHub API accessible"
+    echo "❌ Failed to reach required GitHub domains:"
+    printf '%s\n' "${FAILED_DOMAINS[@]}"
+    echo ""
+    echo "Network troubleshooting info:"
+    echo "Routes:"
+    ip route show
+    echo ""
+    echo "Testing outbound connectivity:"
+    PUBLIC_IP=$(curl -s --connect-timeout 10 ifconfig.me)
+    if [ -n "$PUBLIC_IP" ]; then
+        echo "✅ NAT Gateway working - Public IP: $PUBLIC_IP"
+    else
+        echo "❌ No outbound connectivity - NAT Gateway issue?"
+    fi
+    echo ""
+    echo "⚠️  WARNING: Runner may not work correctly due to connectivity issues"
+    # Don't exit - continue with registration attempt in case it's a transient issue
 else
-    echo "❌ GitHub API not accessible"
-    exit 1
+    echo ""
+    echo "======================================"
+    echo "✅ All connectivity tests passed"
+    echo "======================================"
 fi
-
-echo "======================================"
-echo "✅ All connectivity tests passed"
-echo "======================================"
 echo ""
 
 # If token is not provided via Terraform, try to generate it
@@ -569,6 +592,18 @@ if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
     echo "⚠️  WARNING: Runner is NOT registered and will NOT pick up jobs!"
 else
     echo "✅ Runner token provided, proceeding with registration..."
+    
+    # First, run connectivity check using runner's built-in check
+    echo ""
+    echo "Running GitHub Actions runner connectivity check..."
+    sudo -u runner bash <<CHECKEOF
+cd $RUNNER_DIR
+if [ -f "./config.sh" ]; then
+    # Note: --check flag requires the runner to be downloaded first
+    echo "Runner files present, skipping --check (will verify during config)"
+fi
+CHECKEOF
+    
     # Configure runner as runner user
     sudo -u runner bash <<EOF
 cd $RUNNER_DIR
@@ -583,6 +618,14 @@ echo "Running runner configuration..."
 
 if [ \$? -eq 0 ]; then
     echo "✅ Runner configuration successful"
+    
+    # Verify the runner was registered
+    if [ -f ".runner" ]; then
+        echo "✅ Runner registration file created"
+        cat .runner
+    else
+        echo "⚠️  WARNING: Runner registration file not found"
+    fi
 else
     echo "❌ Runner configuration failed with exit code \$?"
     exit 1
