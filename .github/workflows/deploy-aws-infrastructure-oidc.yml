@@ -137,7 +137,7 @@ jobs:
           
           instance_type = "t3.medium"
           
-          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_repo_url      = "https://github.com/${{ github.event.inputs.runner_repository }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
@@ -262,7 +262,7 @@ jobs:
           
           instance_type = "t3.medium"
           
-          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_repo_url      = "https://github.com/${{ github.event.inputs.runner_repository }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
