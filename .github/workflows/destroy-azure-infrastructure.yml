@@ -6,6 +6,7 @@ on:
       environment:
         description: 'Environment to destroy'
         required: true
+        default: 'dev'
         type: choice
         options:
           - dev
@@ -18,7 +19,7 @@ on:
 
 env:
   TF_VERSION: '1.6.0'
-  ENVIRONMENT: ${{ github.event.inputs.environment }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
 
 jobs:
   setup-backend:
