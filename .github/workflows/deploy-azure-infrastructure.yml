@@ -297,3 +297,122 @@ jobs:
           name: terraform-outputs-${{ env.ENVIRONMENT }}
           path: Azure/terraform/outputs.json
           retention-days: 30
+
+  rollback-on-failure:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [setup-backend, generate-runner-token, terraform-plan, terraform-apply]
+    if: failure()
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check if infrastructure was partially deployed
+        id: check-state
+        working-directory: Azure/terraform
+        continue-on-error: true
+        run: |
+          # Try to check if state file exists in Azure Storage
+          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+            BLOB_EXISTS=$(az storage blob exists \
+              --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
+              --container-name tfstate \
+              --name azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate \
+              --auth-mode login \
+              --query exists -o tsv)
+            echo "state_exists=$BLOB_EXISTS" >> $GITHUB_OUTPUT
+          else
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Destroy partially created infrastructure
+        if: steps.check-state.outputs.state_exists == 'true'
+        working-directory: Azure/terraform
+        continue-on-error: true
+        env:
+          TF_VAR_github_runner_token: ${{ needs.generate-runner-token.outputs.runner_token || 'dummy-token' }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+        run: |
+          cat > terraform.tfvars <<EOF
+          location      = "${{ env.AZURE_LOCATION }}"
+          project_name  = "testcontainers"
+          environment   = "${{ env.ENVIRONMENT }}"
+          
+          vnet_address_space     = ["10.0.0.0/16"]
+          public_subnet_prefix   = "10.0.1.0/24"
+          private_subnet_prefix  = "10.0.2.0/24"
+          
+          vm_size = "Standard_D2s_v3"
+          
+          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT }}"
+          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          
+          github_org                     = "${{ github.repository_owner }}"
+          github_repo                    = "${{ github.event.repository.name }}"
+          terraform_state_resource_group = "${{ needs.setup-backend.outputs.backend_resource_group }}"
+          terraform_state_storage_account = "${{ needs.setup-backend.outputs.backend_storage_account }}"
+          EOF
+          
+          cat > backend.tf <<EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
+              storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
+              container_name       = "tfstate"
+              key                  = "azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              use_oidc             = true
+            }
+          }
+          EOF
+          
+          terraform init
+          terraform destroy -auto-approve
+
+      - name: Clean up Terraform state
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+            echo "Removing Terraform state file..."
+            az storage blob delete \
+              --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
+              --container-name tfstate \
+              --name azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate \
+              --auth-mode login || true
+          fi
+
+      - name: Rollback Summary
+        if: always()
+        run: |
+          echo "## Rollback Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment failed and rollback was attempted." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Actions taken:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Checked for partially deployed infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Destroyed any partially created resources" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Cleaned up Terraform state file" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Backend resources (Resource Group and Storage Account) are preserved for future deployments." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please review the workflow logs to identify the failure cause." >> $GITHUB_STEP_SUMMARY

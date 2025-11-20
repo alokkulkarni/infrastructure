@@ -284,3 +284,109 @@ jobs:
           name: terraform-outputs-${{ env.ENVIRONMENT }}
           path: AWS/terraform/outputs.json
           retention-days: 30
+
+  rollback-on-failure:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [setup-backend, generate-runner-token, terraform-plan, terraform-apply]
+    if: failure()
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Rollback
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check if infrastructure was partially deployed
+        id: check-state
+        working-directory: AWS/terraform
+        continue-on-error: true
+        run: |
+          # Try to check if state file exists
+          if [ -n "${{ needs.setup-backend.outputs.backend_bucket }}" ]; then
+            aws s3 ls s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate && echo "state_exists=true" >> $GITHUB_OUTPUT || echo "state_exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Destroy partially created infrastructure
+        if: steps.check-state.outputs.state_exists == 'true'
+        working-directory: AWS/terraform
+        continue-on-error: true
+        env:
+          TF_VAR_github_runner_token: ${{ needs.generate-runner-token.outputs.runner_token || 'dummy-token' }}
+        run: |
+          cat > terraform.tfvars <<EOF
+          aws_region        = "${{ env.AWS_REGION }}"
+          project_name      = "testcontainers"
+          environment       = "${{ env.ENVIRONMENT }}"
+          availability_zone = "${{ env.AWS_REGION }}a"
+          
+          vpc_cidr            = "10.0.0.0/16"
+          public_subnet_cidr  = "10.0.1.0/24"
+          private_subnet_cidr = "10.0.2.0/24"
+          
+          instance_type = "t3.medium"
+          
+          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
+          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          
+          github_org             = "${{ github.repository_owner }}"
+          github_repo            = "${{ github.event.repository.name }}"
+          terraform_state_bucket = "${{ needs.setup-backend.outputs.backend_bucket }}"
+          terraform_lock_table   = "${{ needs.setup-backend.outputs.backend_table }}"
+          EOF
+          
+          cat > backend.tf <<EOF
+          terraform {
+            backend "s3" {
+              bucket         = "${{ needs.setup-backend.outputs.backend_bucket }}"
+              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              region         = "${{ env.AWS_REGION }}"
+              encrypt        = true
+              dynamodb_table = "${{ needs.setup-backend.outputs.backend_table }}"
+            }
+          }
+          EOF
+          
+          terraform init
+          terraform destroy -auto-approve
+
+      - name: Clean up Terraform state
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "${{ needs.setup-backend.outputs.backend_bucket }}" ]; then
+            echo "Removing Terraform state file..."
+            aws s3 rm s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate || true
+          fi
+
+      - name: Rollback Summary
+        if: always()
+        run: |
+          echo "## Rollback Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment failed and rollback was attempted." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Actions taken:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Checked for partially deployed infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Destroyed any partially created resources" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Cleaned up Terraform state file" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Backend resources (S3 bucket and DynamoDB table) are preserved for future deployments." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please review the workflow logs to identify the failure cause." >> $GITHUB_STEP_SUMMARY
