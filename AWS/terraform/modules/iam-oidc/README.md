@@ -12,37 +12,45 @@ This module creates an IAM role that GitHub Actions can assume using OIDC (OpenI
 ## Idempotent Design
 
 ### Problem
-AWS only allows one OIDC provider per URL (`https://token.actions.githubusercontent.com`). If you:
-1. Created the OIDC provider manually in AWS Console (to get the ARN for secrets)
-2. Run Terraform to create infrastructure
+AWS resources may already exist if created manually in AWS Console. This causes Terraform errors:
 
-You would get this error:
-```
-Error: creating IAM OIDC Provider: EntityAlreadyExists: 
-Provider with url https://token.actions.githubusercontent.com already exists.
-```
+1. **OIDC Provider Error**: AWS only allows one OIDC provider per URL
+   ```
+   Error: EntityAlreadyExists: Provider with url https://token.actions.githubusercontent.com already exists.
+   ```
+
+2. **IAM Role Error**: If the role was created manually
+   ```
+   Error: EntityAlreadyExists: Role with name testcontainers-dev-github-actions-role already exists.
+   ```
 
 ### Solution
 
-This module is designed to work with existing OIDC providers:
+This module is designed to work with existing resources:
 
 1. **Automatic Import**: The workflow includes an import script (`import-existing-oidc.sh`) that runs before Terraform operations
-2. **State Management**: If the OIDC provider exists in AWS but not in Terraform state, it's automatically imported
-3. **Shared Resource**: The OIDC provider is tagged as `Environment = "shared"` because it's used across all environments
+2. **State Management**: If resources exist in AWS but not in Terraform state, they're automatically imported
+3. **Shared OIDC Provider**: The OIDC provider is tagged as `Environment = "shared"` (used across all environments)
+4. **Per-Environment Roles**: Each environment gets its own IAM role
 
 ### How It Works
 
 The workflow runs this sequence:
 ```bash
 terraform init
-→ import-existing-oidc.sh  # Checks and imports existing OIDC provider
+→ import-existing-oidc.sh  # Checks and imports existing OIDC provider AND role
 → terraform plan/apply      # Now aware of existing resources
 ```
 
 The import script:
-- Checks if OIDC provider exists in AWS
-- Checks if it's already in Terraform state
-- Imports it if needed: `terraform import module.iam_oidc.aws_iam_openid_connect_provider.github <ARN>`
+- Checks if OIDC provider exists in AWS → imports if needed
+- Checks if IAM role exists in AWS → imports if needed
+- Checks if resources are already in Terraform state → skips if present
+- Import commands:
+  ```bash
+  terraform import module.iam_oidc.aws_iam_openid_connect_provider.github <OIDC_ARN>
+  terraform import module.iam_oidc.aws_iam_role.github_actions <ROLE_NAME>
+  ```
 
 ## Usage
 
@@ -80,6 +88,8 @@ The workflow automatically handles OIDC provider import:
 - name: Terraform Plan
   run: terraform plan
 ```
+
+**Note**: The script now handles both OIDC provider and IAM role imports automatically.
 
 ## Resource Sharing
 
@@ -119,8 +129,9 @@ The IAM role includes permissions for:
 
 ## Manual Import (if needed)
 
-If you need to manually import the OIDC provider:
+If you need to manually import resources:
 
+### OIDC Provider
 ```bash
 # Get your AWS account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -131,11 +142,19 @@ terraform import \
   "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
 ```
 
+### IAM Role
+```bash
+# Import the IAM role (replace 'dev' with your environment)
+terraform import \
+  module.iam_oidc.aws_iam_role.github_actions \
+  "testcontainers-dev-github-actions-role"
+```
+
 ## Troubleshooting
 
-### Error: EntityAlreadyExists
+### Error: EntityAlreadyExists (OIDC Provider or Role)
 
-If you see this error, the OIDC provider exists but isn't in Terraform state:
+If you see this error, the resource exists in AWS but isn't in Terraform state:
 
 **Solution**: Run the import script manually:
 ```bash
@@ -143,12 +162,19 @@ cd infrastructure/AWS
 ./scripts/import-existing-oidc.sh
 ```
 
-Or import directly:
+Or import resources directly:
 ```bash
 cd infrastructure/AWS/terraform
+
+# Import OIDC provider
 terraform import \
   module.iam_oidc.aws_iam_openid_connect_provider.github \
   arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com
+
+# Import IAM role (adjust environment as needed)
+terraform import \
+  module.iam_oidc.aws_iam_role.github_actions \
+  testcontainers-dev-github-actions-role
 ```
 
 ### Multiple Environments

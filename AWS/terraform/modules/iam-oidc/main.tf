@@ -56,6 +56,12 @@ resource "aws_iam_role" "github_actions" {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+
+  lifecycle {
+    # Prevent recreation if role already exists and is managed outside Terraform
+    # The import script will handle bringing existing roles into state
+    prevent_destroy = false
+  }
 }
 
 # Assume Role Policy - allows GitHub Actions to assume this role

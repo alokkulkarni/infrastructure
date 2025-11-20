@@ -1,14 +1,14 @@
 #!/bin/bash
-# Script to import existing GitHub OIDC provider into Terraform state
-# This prevents "EntityAlreadyExists" errors when the OIDC provider was created manually
+# Script to import existing GitHub OIDC provider and IAM role into Terraform state
+# This prevents "EntityAlreadyExists" errors when resources were created manually
 
 set -e
 
 OIDC_URL="token.actions.githubusercontent.com"
 
-echo "======================================"
-echo "Checking for existing OIDC provider"
-echo "======================================"
+echo "=========================================="
+echo "Checking for existing OIDC resources"
+echo "=========================================="
 
 # Get AWS account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -41,6 +41,46 @@ else
 fi
 
 echo ""
-echo "======================================"
-echo "OIDC provider check completed"
-echo "======================================"
+echo "====================================="
+echo "Checking for existing IAM role"
+echo "====================================="
+
+# Get environment from terraform.tfvars or use dev as default
+if [ -f "terraform.tfvars" ]; then
+    ENVIRONMENT=$(grep -E '^environment[[:space:]]*=' terraform.tfvars | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "dev")
+else
+    ENVIRONMENT="dev"
+fi
+
+ROLE_NAME="testcontainers-${ENVIRONMENT}-github-actions-role"
+
+echo "Environment: $ENVIRONMENT"
+echo "Expected IAM Role: $ROLE_NAME"
+echo ""
+
+# Check if IAM role exists in AWS
+echo "Checking if IAM role exists in AWS..."
+if aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+    echo "✓ IAM role exists in AWS"
+    
+    # Check if it's already in Terraform state
+    echo "Checking Terraform state..."
+    if terraform state list 2>/dev/null | grep -q "module.iam_oidc.aws_iam_role.github_actions"; then
+        echo "✓ IAM role already in Terraform state"
+    else
+        echo "⚠ IAM role exists in AWS but not in Terraform state"
+        echo "Importing IAM role into Terraform state..."
+        
+        # Import the existing IAM role
+        terraform import "module.iam_oidc.aws_iam_role.github_actions" "$ROLE_NAME"
+        
+        echo "✓ IAM role imported successfully"
+    fi
+else
+    echo "✓ IAM role does not exist in AWS (will be created by Terraform)"
+fi
+
+echo ""
+echo "=========================================="
+echo "OIDC resources check completed"
+echo "=========================================="
