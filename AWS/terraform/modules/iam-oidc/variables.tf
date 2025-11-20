@@ -8,6 +8,11 @@ variable "environment" {
   type        = string
 }
 
+variable "environment_tag" {
+  description = "Environment tag for resource isolation"
+  type        = string
+}
+
 variable "github_org" {
   description = "GitHub organization or username"
   type        = string

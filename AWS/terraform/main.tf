@@ -13,9 +13,10 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Environment = var.environment
-      Project     = var.project_name
-      ManagedBy   = "Terraform"
+      Environment    = var.environment
+      EnvironmentTag = var.environment_tag
+      Project        = var.project_name
+      ManagedBy      = "Terraform"
     }
   }
 }
@@ -26,6 +27,7 @@ module "iam_oidc" {
 
   project_name           = var.project_name
   environment            = var.environment
+  environment_tag        = var.environment_tag
   github_org             = var.github_org
   github_repo            = var.github_repo
   terraform_state_bucket = var.terraform_state_bucket
@@ -38,6 +40,7 @@ module "networking" {
 
   project_name        = var.project_name
   environment         = var.environment
+  environment_tag     = var.environment_tag
   vpc_cidr            = var.vpc_cidr
   availability_zone   = var.availability_zone
   public_subnet_cidr  = var.public_subnet_cidr
@@ -48,9 +51,10 @@ module "networking" {
 module "security" {
   source = "./modules/security"
 
-  project_name = var.project_name
-  environment  = var.environment
-  vpc_id       = module.networking.vpc_id
+  project_name    = var.project_name
+  environment     = var.environment
+  environment_tag = var.environment_tag
+  vpc_id          = module.networking.vpc_id
 }
 
 # EC2 Instance
@@ -59,6 +63,7 @@ module "ec2" {
 
   project_name         = var.project_name
   environment          = var.environment
+  environment_tag      = var.environment_tag
   instance_type        = var.instance_type
   ami_id               = var.ami_id
   subnet_id            = module.networking.private_subnet_id

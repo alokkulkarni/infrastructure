@@ -16,6 +16,11 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "environment_tag" {
+  description = "Environment tag for resource isolation (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM). Used to isolate resources for different teams/testers and manage separate state files."
+  type        = string
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for VPC"
   type        = string

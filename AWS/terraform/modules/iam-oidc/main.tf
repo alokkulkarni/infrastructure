@@ -42,6 +42,9 @@ resource "aws_iam_openid_connect_provider" "github" {
   lifecycle {
     # Ignore thumbprint changes as GitHub may rotate certificates
     ignore_changes = [thumbprint_list]
+    # CRITICAL: Never destroy OIDC provider - it's shared across all environments
+    # and required for GitHub Actions authentication
+    prevent_destroy = true
   }
 }
 
@@ -58,9 +61,9 @@ resource "aws_iam_role" "github_actions" {
   }
 
   lifecycle {
-    # Prevent recreation if role already exists and is managed outside Terraform
-    # The import script will handle bringing existing roles into state
-    prevent_destroy = false
+    # CRITICAL: Never destroy IAM role - it's required for GitHub Actions authentication
+    # Destroying this role will break all future workflow runs
+    prevent_destroy = true
   }
 }
 

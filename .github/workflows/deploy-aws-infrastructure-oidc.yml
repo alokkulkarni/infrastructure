@@ -17,11 +17,16 @@ on:
         required: true
         default: 'us-east-1'
         type: string
+      environment_tag:
+        description: 'Environment Tag (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM) - Used for resource isolation and state management. Example: SIT-john-teamA-20251120-1430'
+        required: true
+        type: string
 
 env:
   TF_VERSION: '1.6.0'
   AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+  ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 
 jobs:
   setup-backend:
@@ -118,6 +123,7 @@ jobs:
           aws_region        = "${{ env.AWS_REGION }}"
           project_name      = "testcontainers"
           environment       = "${{ env.ENVIRONMENT }}"
+          environment_tag   = "${{ env.ENVIRONMENT_TAG }}"
           availability_zone = "${{ env.AWS_REGION }}a"
           
           vpc_cidr            = "10.0.0.0/16"
@@ -127,8 +133,8 @@ jobs:
           instance_type = "t3.medium"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           # OIDC Configuration (backend resource names derived from setup-backend job)
           github_org             = "${{ github.repository_owner }}"
@@ -144,7 +150,7 @@ jobs:
           terraform {
             backend "s3" {
               bucket         = "${{ needs.setup-backend.outputs.backend_bucket }}"
-              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               region         = "${{ env.AWS_REGION }}"
               encrypt        = true
               dynamodb_table = "${{ needs.setup-backend.outputs.backend_table }}"
@@ -230,6 +236,7 @@ jobs:
           aws_region        = "${{ env.AWS_REGION }}"
           project_name      = "testcontainers"
           environment       = "${{ env.ENVIRONMENT }}"
+          environment_tag   = "${{ env.ENVIRONMENT_TAG }}"
           availability_zone = "${{ env.AWS_REGION }}a"
           
           vpc_cidr            = "10.0.0.0/16"
@@ -239,8 +246,8 @@ jobs:
           instance_type = "t3.medium"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           # OIDC Configuration (backend resource names derived from setup-backend job)
           github_org             = "${{ github.repository_owner }}"
@@ -256,7 +263,7 @@ jobs:
           terraform {
             backend "s3" {
               bucket         = "${{ needs.setup-backend.outputs.backend_bucket }}"
-              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               region         = "${{ env.AWS_REGION }}"
               encrypt        = true
               dynamodb_table = "${{ needs.setup-backend.outputs.backend_table }}"
@@ -352,7 +359,7 @@ jobs:
         run: |
           # Try to check if state file exists
           if [ -n "${{ needs.setup-backend.outputs.backend_bucket }}" ]; then
-            aws s3 ls s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate && echo "state_exists=true" >> $GITHUB_OUTPUT || echo "state_exists=false" >> $GITHUB_OUTPUT
+            aws s3 ls s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate && echo "state_exists=true" >> $GITHUB_OUTPUT || echo "state_exists=false" >> $GITHUB_OUTPUT
           else
             echo "state_exists=false" >> $GITHUB_OUTPUT
           fi
@@ -368,6 +375,7 @@ jobs:
           aws_region        = "${{ env.AWS_REGION }}"
           project_name      = "testcontainers"
           environment       = "${{ env.ENVIRONMENT }}"
+          environment_tag   = "${{ env.ENVIRONMENT_TAG }}"
           availability_zone = "${{ env.AWS_REGION }}a"
           
           vpc_cidr            = "10.0.0.0/16"
@@ -377,8 +385,8 @@ jobs:
           instance_type = "t3.medium"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           github_org             = "${{ github.repository_owner }}"
           github_repo            = "${{ github.event.repository.name }}"
@@ -390,7 +398,7 @@ jobs:
           terraform {
             backend "s3" {
               bucket         = "${{ needs.setup-backend.outputs.backend_bucket }}"
-              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               region         = "${{ env.AWS_REGION }}"
               encrypt        = true
               dynamodb_table = "${{ needs.setup-backend.outputs.backend_table }}"
@@ -399,7 +407,13 @@ jobs:
           EOF
           
           terraform init
-          terraform destroy -auto-approve
+          
+          # Exclude OIDC module from rollback to preserve authentication
+          terraform destroy \
+            -target=module.ec2 \
+            -target=module.security \
+            -target=module.networking \
+            -auto-approve
 
       - name: Clean up Terraform state
         if: always()
@@ -407,7 +421,7 @@ jobs:
         run: |
           if [ -n "${{ needs.setup-backend.outputs.backend_bucket }}" ]; then
             echo "Removing Terraform state file..."
-            aws s3 rm s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate || true
+            aws s3 rm s3://${{ needs.setup-backend.outputs.backend_bucket }}/aws/ec2-runner/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate || true
           fi
 
       - name: Rollback Summary
