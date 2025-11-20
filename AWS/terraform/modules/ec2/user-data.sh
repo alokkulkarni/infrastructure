@@ -544,7 +544,7 @@ declare -a GITHUB_DOMAINS=(
 
 FAILED_DOMAINS=()
 
-for domain_desc in "${GITHUB_DOMAINS[@]}"; do
+for domain_desc in "$${GITHUB_DOMAINS[@]}"; do
     IFS=':' read -r domain desc <<< "$domain_desc"
     echo "Testing $desc ($domain)..."
     if timeout 10 curl -Is https://$domain --connect-timeout 10 > /dev/null 2>&1; then
@@ -555,10 +555,10 @@ for domain_desc in "${GITHUB_DOMAINS[@]}"; do
     fi
 done
 
-if [ ${#FAILED_DOMAINS[@]} -gt 0 ]; then
+if [ $${#FAILED_DOMAINS[@]} -gt 0 ]; then
     echo ""
     echo "❌ Failed to reach required GitHub domains:"
-    printf '%s\n' "${FAILED_DOMAINS[@]}"
+    printf '%s\n' "$${FAILED_DOMAINS[@]}"
     echo ""
     echo "Network troubleshooting info:"
     echo "Routes:"
