@@ -16,38 +16,170 @@ echo "======================================"
 echo "Timestamp: $(date)"
 
 # Disable IPv6 to prevent apt from trying IPv6 connections through NAT Gateway
-echo "Disabling IPv6 for package installation..."
+log "Disabling IPv6 for package installation..."
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 sysctl -w net.ipv6.conf.default.disable_ipv6=1
 
-# Update system
-echo "Updating system packages..."
-apt-get update -y
-apt-get upgrade -y
+# Configure multiple Ubuntu mirrors for reliability
+log "Configuring Ubuntu package mirrors with fallback options..."
+cat > /etc/apt/sources.list <<'APT_SOURCES'
+# Primary: AWS EC2 regional mirror (fastest)
+deb http://eu-west-2.ec2.archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+deb http://eu-west-2.ec2.archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+deb http://eu-west-2.ec2.archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
 
-# Install essential packages
-echo "Installing essential packages..."
+# Fallback 1: Main Ubuntu archive
+# deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+# deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+
+# Fallback 2: CloudFront CDN mirror
+# deb http://us.archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+# deb http://us.archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+APT_SOURCES
+
+# Configure apt to retry with timeout and use IPv4 only
+log "Configuring apt for better reliability..."
+cat > /etc/apt/apt.conf.d/99custom <<'APT_CONFIG'
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::Retries "3";
+Acquire::http::No-Cache "true";
+APT_CONFIG
+
+# Try to update package lists with retries
+log "Updating package lists (with automatic fallback to mirrors)..."
+retry_count=0
+max_retries=3
+until apt-get update -y || [ $retry_count -eq $max_retries ]; do
+    retry_count=$((retry_count + 1))
+    log "Package update attempt $retry_count failed, trying fallback mirror..."
+    
+    if [ $retry_count -eq 2 ]; then
+        # Switch to main Ubuntu archive
+        sed -i 's|eu-west-2.ec2.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+    elif [ $retry_count -eq 3 ]; then
+        # Switch to US mirror
+        sed -i 's|archive.ubuntu.com|us.archive.ubuntu.com|g' /etc/apt/sources.list
+    fi
+    sleep 5
+done
+
+if [ $retry_count -eq $max_retries ]; then
+    log "⚠️  WARNING: Package update failed after $max_retries attempts. Will try to continue..."
+fi
+
+log "Upgrading existing packages..."
+apt-get upgrade -y || log "⚠️  Package upgrade had issues, continuing..."
+
+# Install minimal essential packages first (needed for runner setup)
+log "Installing minimal essential packages for runner..."
+apt-get install -y curl wget ca-certificates || log "⚠️  Some packages failed to install"
+
+# ==============================================
+# PRIORITY: Configure GitHub Actions Runner FIRST
+# (before heavy Docker/Nginx installation)
+# ==============================================
+log "======================================"
+log "Setting up GitHub Actions Runner (Priority 1)"
+log "======================================"
+
+# Create runner user
+log "Creating runner user..."
+useradd -m -s /bin/bash runner || log "Runner user may already exist"
+
+# Install GitHub Actions Runner
+RUNNER_DIR="/home/runner/actions-runner"
+mkdir -p $RUNNER_DIR
+cd $RUNNER_DIR
+
+# Download the latest runner package
+log "Downloading GitHub Actions Runner..."
+RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/v//') || RUNNER_VERSION="2.311.0"
+log "Runner version: $RUNNER_VERSION"
+
+curl -o actions-runner-linux-x64-$RUNNER_VERSION.tar.gz -L \
+  https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz || {
+    log "❌ Failed to download runner package"
+    exit 1
+}
+
+# Extract the installer
+tar xzf ./actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
+rm actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
+
+# Set ownership
+chown -R runner:runner $RUNNER_DIR
+
+# Runner configuration variables
+GITHUB_REPO_URL="${github_repo_url}"
+RUNNER_TOKEN="${github_runner_token}"
+RUNNER_NAME="${github_runner_name}"
+RUNNER_LABELS="${github_runner_labels}"
+
+log "Runner configuration:"
+log "  Repository URL: $GITHUB_REPO_URL"
+log "  Runner Name: $RUNNER_NAME"
+log "  Runner Labels: $RUNNER_LABELS"
+log "  Token provided: $(if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+
+# Configure and start runner if token is available
+if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then
+    log "Configuring runner with provided token..."
+    
+    # Configure runner as runner user
+    su - runner -c "cd $RUNNER_DIR && ./config.sh --url $GITHUB_REPO_URL --token $RUNNER_TOKEN --name $RUNNER_NAME --labels $RUNNER_LABELS --unattended --replace"
+    
+    if [ $? -eq 0 ]; then
+        log "✅ Runner configured successfully"
+        
+        # Install and start runner service
+        cd $RUNNER_DIR
+        ./svc.sh install runner
+        ./svc.sh start
+        
+        log "✅ Runner service started"
+        log "======================================"
+        log "GitHub Actions Runner Setup Complete!"
+        log "======================================"
+    else
+        log "❌ Runner configuration failed"
+    fi
+else
+    log "❌ ERROR: No runner token provided. Runner will need to be configured manually."
+    log "To configure manually, run as the runner user:"
+    log "sudo su - runner"
+    log "cd $RUNNER_DIR"
+    log "./config.sh --url $GITHUB_REPO_URL --token <YOUR_TOKEN> --name $RUNNER_NAME --labels $RUNNER_LABELS"
+fi
+
+# ==============================================
+# NOW Install Docker and other services
+# ==============================================
+log "======================================"
+log "Installing Docker and Additional Services"
+log "======================================"
+
+# Install remaining essential packages
+log "Installing additional essential packages..."
 apt-get install -y \
-    curl \
-    wget \
     git \
     jq \
     unzip \
-    ca-certificates \
     gnupg \
     lsb-release \
     apt-transport-https \
-    software-properties-common
+    software-properties-common || log "⚠️  Some additional packages failed"
 
 # Install Docker
-echo "Installing Docker..."
+log "Installing Docker..."
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
   $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-apt-get update -y
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+apt-get update -y || log "⚠️  Docker repo update had issues"
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || log "⚠️  Docker installation had issues"
 
 # Start and enable Docker
 systemctl start docker
@@ -474,221 +606,13 @@ else
 fi
 
 # Install AWS CLI
-echo "Installing AWS CLI..."
+log "Installing AWS CLI..."
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
 ./aws/install
 rm -rf aws awscliv2.zip
-
-# Verify AWS CLI installation
 aws --version
-
-echo "AWS CLI installation completed"
-
-# Setup GitHub Actions Runner
-echo "Setting up GitHub Actions Runner..."
-
-# Create a runner user
-useradd -m -s /bin/bash runner
-usermod -aG docker runner
-
-# Create runner directory
-RUNNER_HOME="/home/runner"
-RUNNER_DIR="$RUNNER_HOME/actions-runner"
-mkdir -p $RUNNER_DIR
-cd $RUNNER_DIR
-
-# Download the latest runner package
-echo "Downloading GitHub Actions Runner..."
-RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/v//')
-curl -o actions-runner-linux-x64-$RUNNER_VERSION.tar.gz -L \
-  https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
-
-# Extract the installer
-tar xzf ./actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
-rm actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
-
-# Set ownership
-chown -R runner:runner $RUNNER_DIR
-
-# Configure runner
-echo "Configuring GitHub Actions Runner..."
-
-# Runner configuration variables
-GITHUB_REPO_URL="${github_repo_url}"
-RUNNER_TOKEN="${github_runner_token}"
-RUNNER_NAME="${github_runner_name}"
-RUNNER_LABELS="${github_runner_labels}"
-
-echo "Runner configuration:"
-echo "  Repository URL: $GITHUB_REPO_URL"
-echo "  Runner Name: $RUNNER_NAME"
-echo "  Runner Labels: $RUNNER_LABELS"
-echo "  Token provided: $(if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
-
-# Test GitHub connectivity before attempting registration
-echo ""
-echo "======================================"
-echo "Testing GitHub Connectivity..."
-echo "======================================"
-
-# Test DNS
-echo "Testing DNS resolution for github.com..."
-if nslookup github.com > /dev/null 2>&1; then
-    echo "✅ DNS resolution successful"
-else
-    echo "❌ DNS resolution failed - cannot reach GitHub"
-    echo "DNS servers:"
-    cat /etc/resolv.conf | grep nameserver
-    exit 1
-fi
-
-# Test core GitHub domains required for runner
-declare -a GITHUB_DOMAINS=(
-    "github.com:Main GitHub"
-    "api.github.com:GitHub API"
-    "pipelines.actions.githubusercontent.com:Runner communication"
-    "results-receiver.actions.githubusercontent.com:Job results"
-    "vstoken.actions.githubusercontent.com:OIDC tokens"
-)
-
-FAILED_DOMAINS=()
-
-for domain_desc in "$${GITHUB_DOMAINS[@]}"; do
-    IFS=':' read -r domain desc <<< "$domain_desc"
-    echo "Testing $desc ($domain)..."
-    if timeout 10 curl -Is https://$domain --connect-timeout 10 > /dev/null 2>&1; then
-        echo "✅ $desc - accessible"
-    else
-        echo "❌ $desc - NOT accessible"
-        FAILED_DOMAINS+=("$domain")
-    fi
-done
-
-if [ $${#FAILED_DOMAINS[@]} -gt 0 ]; then
-    echo ""
-    echo "❌ Failed to reach required GitHub domains:"
-    printf '%s\n' "$${FAILED_DOMAINS[@]}"
-    echo ""
-    echo "Network troubleshooting info:"
-    echo "Routes:"
-    ip route show
-    echo ""
-    echo "Testing outbound connectivity:"
-    PUBLIC_IP=$(curl -s --connect-timeout 10 ifconfig.me)
-    if [ -n "$PUBLIC_IP" ]; then
-        echo "✅ NAT Gateway working - Public IP: $PUBLIC_IP"
-    else
-        echo "❌ No outbound connectivity - NAT Gateway issue?"
-    fi
-    echo ""
-    echo "⚠️  WARNING: Runner may not work correctly due to connectivity issues"
-    # Don't exit - continue with registration attempt in case it's a transient issue
-else
-    echo ""
-    echo "======================================"
-    echo "✅ All connectivity tests passed"
-    echo "======================================"
-fi
-echo ""
-
-# If token is not provided via Terraform, try to generate it
-if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
-    echo "❌ ERROR: No runner token provided. Runner will need to be configured manually."
-    echo "To configure manually, run as the runner user:"
-    echo "sudo su - runner"
-    echo "cd $RUNNER_DIR"
-    echo "./config.sh --url $GITHUB_REPO_URL --token YOUR_TOKEN --name $RUNNER_NAME --labels $RUNNER_LABELS"
-    echo "⚠️  WARNING: Runner is NOT registered and will NOT pick up jobs!"
-else
-    echo "✅ Runner token provided, proceeding with registration..."
-    
-    # First, run connectivity check using runner's built-in check
-    echo ""
-    echo "Running GitHub Actions runner connectivity check..."
-    sudo -u runner bash <<CHECKEOF
-cd $RUNNER_DIR
-if [ -f "./config.sh" ]; then
-    # Note: --check flag requires the runner to be downloaded first
-    echo "Runner files present, skipping --check (will verify during config)"
-fi
-CHECKEOF
-    
-    # Configure runner as runner user
-    sudo -u runner bash <<EOF
-cd $RUNNER_DIR
-echo "Running runner configuration..."
-./config.sh \
-    --url $GITHUB_REPO_URL \
-    --token $RUNNER_TOKEN \
-    --name $RUNNER_NAME \
-    --labels $RUNNER_LABELS \
-    --unattended \
-    --replace
-
-if [ \$? -eq 0 ]; then
-    echo "✅ Runner configuration successful"
-    
-    # Verify the runner was registered
-    if [ -f ".runner" ]; then
-        echo "✅ Runner registration file created"
-        cat .runner
-    else
-        echo "⚠️  WARNING: Runner registration file not found"
-    fi
-else
-    echo "❌ Runner configuration failed with exit code \$?"
-    exit 1
-fi
-EOF
-
-    if [ $? -eq 0 ]; then
-        echo "✅ Runner configured successfully as runner user"
-        
-        # Install runner as a service
-        cd $RUNNER_DIR
-        ./svc.sh install runner
-        ./svc.sh start
-
-        echo "✅ GitHub Actions Runner configured and started as a service"
-        
-        # Verify service is running
-        sleep 2
-        if systemctl is-active --quiet actions.runner.* 2>/dev/null || ./svc.sh status | grep -q "active"; then
-            echo "✅ Runner service is running"
-        else
-            echo "⚠️  WARNING: Runner service may not be running properly"
-        fi
-    else
-        echo "❌ Failed to configure runner"
-        exit 1
-    fi
-fi
-
-# Create a systemd service for the runner (alternative to svc.sh)
-cat > /etc/systemd/system/github-runner.service <<EOF
-[Unit]
-Description=GitHub Actions Runner
-After=network.target
-
-[Service]
-Type=simple
-User=runner
-WorkingDirectory=$RUNNER_DIR
-ExecStart=$RUNNER_DIR/run.sh
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Reload systemd and enable service (backup method)
-systemctl daemon-reload
-# systemctl enable github-runner
-# systemctl start github-runner
-
-echo "GitHub Actions Runner setup completed"
+log "AWS CLI installation completed"
 
 # Install additional tools
 echo "Installing additional tools..."
