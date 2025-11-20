@@ -1,0 +1,12 @@
+# Packer build artifacts
+manifest.json
+latest-ami-id.txt
+packer_cache/
+crash.log
+
+# Packer plugin directory
+.packer.d/
+
+# Temporary files
+*.tmp
+*.temp

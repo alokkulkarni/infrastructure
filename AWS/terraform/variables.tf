@@ -64,9 +64,15 @@ variable "instance_type" {
 }
 
 variable "ami_id" {
-  description = "AMI ID for EC2 instance (Ubuntu 22.04 LTS)"
+  description = "Custom AMI ID for EC2 instance (leave empty to use latest Ubuntu 22.04 LTS). Use this when you have a pre-built AMI with all packages installed."
   type        = string
-  default     = "" # Will be looked up dynamically in ec2 module
+  default     = "" # Will be looked up dynamically in ec2 module if empty
+}
+
+variable "use_custom_ami" {
+  description = "Whether to use pre-built custom AMI with packages pre-installed (true) or standard Ubuntu AMI (false). When true, uses lightweight user-data script."
+  type        = bool
+  default     = false
 }
 
 variable "github_runner_token" {

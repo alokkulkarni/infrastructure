@@ -70,6 +70,7 @@ module "ec2" {
   environment_tag      = var.environment_tag
   instance_type        = var.instance_type
   ami_id               = var.ami_id
+  use_custom_ami       = var.use_custom_ami
   subnet_id            = module.networking.private_subnet_id
   security_group_ids   = [module.security.ec2_security_group_id]
   github_runner_token  = var.github_runner_token

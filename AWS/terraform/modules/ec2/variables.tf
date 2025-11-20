@@ -19,8 +19,15 @@ variable "instance_type" {
 }
 
 variable "ami_id" {
-  description = "AMI ID for EC2 instance"
+  description = "AMI ID for EC2 instance (if empty, uses latest Ubuntu 22.04)"
   type        = string
+  default     = ""
+}
+
+variable "use_custom_ami" {
+  description = "Whether to use pre-built custom AMI (true) or standard Ubuntu AMI (false)"
+  type        = bool
+  default     = false
 }
 
 variable "subnet_id" {

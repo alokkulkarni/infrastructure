@@ -78,8 +78,10 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 # User Data Script
+# Use lightweight script for custom AMI, full script for standard Ubuntu AMI
 locals {
-  user_data_template = templatefile("${path.module}/user-data.sh", {
+  user_data_script = var.use_custom_ami ? "user-data-ami.sh" : "user-data.sh"
+  user_data_template = templatefile("${path.module}/${local.user_data_script}", {
     github_runner_token  = var.github_runner_token
     github_repo_url      = var.github_repo_url
     github_runner_name   = var.github_runner_name
