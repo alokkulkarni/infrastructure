@@ -63,10 +63,8 @@ Configure AWS credentials:
 | `AWS_ACCESS_KEY_ID` | IAM User access key (apply) | `AKIAIOSFODNN7EXAMPLE` |
 | `AWS_SECRET_ACCESS_KEY` | IAM User secret key (apply) | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
 | `PAT_TOKEN` | GitHub Personal Access Token (runner registration) | `ghp_xxxxxxxxxxxxx` |
-| `TERRAFORM_STATE_BUCKET` | S3 bucket for Terraform state | `testcontainers-terraform-state` |
-| `TERRAFORM_LOCK_TABLE` | DynamoDB table for state locking | `terraform-state-lock` |
-| `EC2_KEY_NAME` | EC2 key pair name for SSH access | `testcontainers-ec2-key` |
-| `ALLOWED_SSH_CIDR` | CIDR for SSH access | `203.0.113.0/24` |
+
+**Note:** Terraform backend resources (S3 bucket and DynamoDB table) are automatically created with names derived from your AWS Account ID. No secrets required for backend configuration.
 
 **When to use:**
 - Migrating from pure access key authentication to OIDC
@@ -83,9 +81,9 @@ Configure AWS credentials:
 1. AWS OIDC Identity Provider configured (for plan/backend jobs)
 2. IAM Role with trust policy for GitHub OIDC (for plan/backend)
 3. IAM User with programmatic access (for apply job)
-4. S3 bucket and DynamoDB table for Terraform state
-5. EC2 key pair created
-6. GitHub PAT with `repo` and `admin:org` scopes
+4. GitHub PAT with `repo` and `admin:org` scopes
+
+**Note:** Backend resources and SSH access no longer required - see "Backend Resource Management" section below.
 
 ---
 
@@ -114,7 +112,7 @@ Configure AWS credentials using OIDC:
 |--------|--------|-----------|
 | **Apply Authentication** | AWS Access Keys | OIDC |
 | **Credential Lifecycle** | 90 days (manual rotation) | 1 hour (auto-expiring) |
-| **Required Secrets** | 8 secrets | 6 secrets |
+| **Required Secrets** | 4 secrets | 2 secrets |
 | **Security Posture** | Mixed | Zero standing privileges ✅ |
 | **AWS Recommendations** | Legacy | Best practice ✅ |
 | **Audit Trail** | CloudTrail (IAM User) | CloudTrail (Role session name) |
@@ -124,10 +122,8 @@ Configure AWS credentials using OIDC:
 |--------|-------------|---------|
 | `AWS_ROLE_ARN` | IAM Role ARN for OIDC (all operations) | `arn:aws:iam::123456789012:role/GitHubActionsRole` |
 | `PAT_TOKEN` | GitHub Personal Access Token | `ghp_xxxxxxxxxxxxx` |
-| `TERRAFORM_STATE_BUCKET` | S3 bucket for Terraform state | `testcontainers-terraform-state` |
-| `TERRAFORM_LOCK_TABLE` | DynamoDB table for state locking | `terraform-state-lock` |
-| `EC2_KEY_NAME` | EC2 key pair name | `testcontainers-ec2-key` |
-| `ALLOWED_SSH_CIDR` | CIDR for SSH access | `203.0.113.0/24` |
+
+**Note:** Terraform backend resources (S3 bucket and DynamoDB table) are automatically created with names derived from your AWS Account ID. No secrets required for backend configuration.
 
 **When to use:**
 - ✅ New infrastructure deployments
@@ -147,9 +143,9 @@ Configure AWS credentials using OIDC:
 **Prerequisites:**
 1. AWS OIDC Identity Provider configured
 2. IAM Role with comprehensive trust policy for GitHub OIDC
-3. S3 bucket and DynamoDB table for Terraform state
-4. EC2 key pair created
-5. GitHub PAT with `repo` and `admin:org` scopes
+3. GitHub PAT with `repo` and `admin:org` scopes
+
+**Note:** Backend resources and SSH access no longer required - see "Backend Resource Management" section below.
 
 ---
 
@@ -172,10 +168,8 @@ Configure AWS credentials:
 Same as `deploy-aws-infrastructure.yml` (hybrid):
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
-- `TERRAFORM_STATE_BUCKET`
-- `TERRAFORM_LOCK_TABLE`
-- `EC2_KEY_NAME`
-- `ALLOWED_SSH_CIDR`
+
+**Note:** Terraform backend resources are automatically derived from AWS Account ID - no secrets required for backend configuration.
 
 **Safety Features:**
 - ✅ Manual workflow dispatch only (no automatic triggers)
@@ -345,31 +339,49 @@ aws iam attach-role-policy \
   --policy-arn arn:aws:iam::aws:policy/AdministratorAccess  # Or custom policy
 ```
 
-#### 3. Create Terraform Backend Resources
+#### 3. Backend Resource Management (Automatic)
 
+**No manual setup required!** The workflows automatically create and manage backend resources:
+
+**How it works:**
+1. The `setup-backend` job runs the setup script which:
+   - Derives unique resource names using your AWS Account ID
+   - Creates S3 bucket: `testcontainers-terraform-state-{AWS_ACCOUNT_ID}`
+   - Creates DynamoDB table: `testcontainers-terraform-locks`
+   - Enables versioning and encryption on the S3 bucket
+   - Sets up lifecycle policies for cost optimization
+
+2. Backend configuration is dynamically generated in workflows:
+   ```yaml
+   # Generated at runtime - no secrets needed
+   terraform {
+     backend "s3" {
+       bucket         = "testcontainers-terraform-state-123456789012"
+       key            = "aws/ec2-runner/dev/terraform.tfstate"
+       region         = "us-east-1"
+       encrypt        = true
+       dynamodb_table = "testcontainers-terraform-locks"
+     }
+   }
+   ```
+
+**Benefits:**
+- ✅ No secrets required for backend configuration
+- ✅ Globally unique bucket names (using AWS Account ID)
+- ✅ Idempotent (can run multiple times safely)
+- ✅ Consistent naming across environments
+
+**Manual setup option (optional):**
+If you want to pre-create resources before running workflows:
 ```bash
 cd infrastructure/AWS
 chmod +x scripts/setup-terraform-backend.sh
 export AWS_REGION=us-east-1
+export PROJECT_NAME=testcontainers  # Optional, defaults to "testcontainers"
 ./scripts/setup-terraform-backend.sh
 ```
 
-This creates:
-- S3 bucket with versioning and encryption
-- DynamoDB table for state locking
-
-#### 4. Create EC2 Key Pair
-
-```bash
-aws ec2 create-key-pair \
-  --key-name testcontainers-ec2-key \
-  --query 'KeyMaterial' \
-  --output text > testcontainers-ec2-key.pem
-
-chmod 400 testcontainers-ec2-key.pem
-```
-
-#### 5. Create GitHub PAT
+#### 4. Create GitHub PAT
 
 1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
 2. Generate new token with scopes:
@@ -493,11 +505,13 @@ Required for `deploy-aws-infrastructure-oidc.yml`:
 ```
 AWS_ROLE_ARN=arn:aws:iam::123456789012:role/GitHubActionsRole
 PAT_TOKEN=ghp_xxxxxxxxxxxxx
-TERRAFORM_STATE_BUCKET=testcontainers-terraform-state
-TERRAFORM_LOCK_TABLE=terraform-state-lock
-EC2_KEY_NAME=testcontainers-ec2-key
-ALLOWED_SSH_CIDR=203.0.113.0/24
 ```
+
+**Note:** Backend resources (S3 bucket and DynamoDB table) are automatically created with names derived from your AWS Account ID:
+- S3 Bucket: `testcontainers-terraform-state-{AWS_ACCOUNT_ID}`
+- DynamoDB Table: `testcontainers-terraform-locks`
+
+No secrets required for backend configuration or SSH access.
 
 ### AWS Secrets (Hybrid)
 
@@ -507,6 +521,8 @@ Additional secrets for `deploy-aws-infrastructure.yml`:
 AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
 AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 ```
+
+**Note:** Backend resources are automatically managed (same as OIDC pure).
 
 ### Azure Secrets (OIDC - Pure)
 

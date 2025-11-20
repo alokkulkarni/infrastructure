@@ -1,20 +1,19 @@
 #!/bin/bash
 # Script to set up S3 backend for Terraform state management
 # This creates the S3 bucket and DynamoDB table for state locking
+# The naming convention uses the project name and AWS account ID for uniqueness
 
 set -e
 
 # Configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
-BUCKET_NAME="${TERRAFORM_STATE_BUCKET:-testcontainers-terraform-state}"
-DYNAMODB_TABLE="${TERRAFORM_LOCK_TABLE:-testcontainers-terraform-locks}"
+PROJECT_NAME="${PROJECT_NAME:-testcontainers}"
 
 echo "======================================"
 echo "Terraform Backend Setup"
 echo "======================================"
+echo "Project: $PROJECT_NAME"
 echo "Region: $AWS_REGION"
-echo "S3 Bucket: $BUCKET_NAME"
-echo "DynamoDB Table: $DYNAMODB_TABLE"
 echo ""
 
 # Check if AWS CLI is installed
@@ -29,6 +28,18 @@ if ! aws sts get-caller-identity &> /dev/null; then
     echo "Error: AWS credentials not configured. Please configure AWS CLI."
     exit 1
 fi
+
+# Get AWS Account ID for unique bucket naming
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "AWS Account ID: $AWS_ACCOUNT_ID"
+
+# Derive resource names from project and account
+BUCKET_NAME="${PROJECT_NAME}-terraform-state-${AWS_ACCOUNT_ID}"
+DYNAMODB_TABLE="${PROJECT_NAME}-terraform-locks"
+
+echo "S3 Bucket: $BUCKET_NAME"
+echo "DynamoDB Table: $DYNAMODB_TABLE"
+echo ""
 
 echo "AWS credentials verified."
 echo ""
@@ -111,7 +122,7 @@ if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_R
         --attribute-definitions AttributeName=LockID,AttributeType=S \
         --key-schema AttributeName=LockID,KeyType=HASH \
         --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
-        --tags Key=Purpose,Value=TerraformStateLocking \
+        --tags Key=Purpose,Value=TerraformStateLocking Key=Project,Value=$PROJECT_NAME \
         --region "$AWS_REGION"
     
     echo "Waiting for DynamoDB table to be active..."
@@ -134,11 +145,15 @@ echo ""
 echo "terraform {"
 echo "  backend \"s3\" {"
 echo "    bucket         = \"$BUCKET_NAME\""
-echo "    key            = \"aws/ec2-runner/terraform.tfstate\""
+echo "    key            = \"aws/ec2-runner/{environment}/terraform.tfstate\""
 echo "    region         = \"$AWS_REGION\""
 echo "    encrypt        = true"
 echo "    dynamodb_table = \"$DYNAMODB_TABLE\""
 echo "  }"
 echo "}"
+echo ""
+echo "Environment variables exported:"
+echo "export TF_BACKEND_BUCKET=\"$BUCKET_NAME\""
+echo "export TF_BACKEND_DYNAMODB_TABLE=\"$DYNAMODB_TABLE\""
 echo ""
 echo "You can now initialize Terraform with: terraform init"

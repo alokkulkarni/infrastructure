@@ -27,6 +27,9 @@ jobs:
   setup-backend:
     name: Setup Terraform Backend
     runs-on: ubuntu-latest
+    outputs:
+      backend_bucket: ${{ steps.backend.outputs.backend_bucket }}
+      backend_table: ${{ steps.backend.outputs.backend_table }}
     permissions:
       id-token: write   # Required for OIDC
       contents: read
@@ -43,13 +46,31 @@ jobs:
           role-session-name: GitHubActions-SetupBackend
 
       - name: Setup Terraform backend
+        id: backend
         working-directory: infrastructure/AWS
         run: |
           chmod +x scripts/setup-terraform-backend.sh
           export AWS_REGION=${{ env.AWS_REGION }}
-          export TERRAFORM_STATE_BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
-          export TERRAFORM_LOCK_TABLE="${{ secrets.TERRAFORM_LOCK_TABLE }}"
+          export PROJECT_NAME="testcontainers"
           ./scripts/setup-terraform-backend.sh
+          
+          # Derive backend resource names (same logic as script)
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BACKEND_BUCKET="testcontainers-terraform-state-${AWS_ACCOUNT_ID}"
+          BACKEND_TABLE="testcontainers-terraform-locks"
+          
+          # Export for subsequent jobs
+          echo "backend_bucket=${BACKEND_BUCKET}" >> $GITHUB_OUTPUT
+          echo "backend_table=${BACKEND_TABLE}" >> $GITHUB_OUTPUT
+          
+          # Derive backend resource names (same logic as script)
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BACKEND_BUCKET="testcontainers-terraform-state-${AWS_ACCOUNT_ID}"
+          BACKEND_TABLE="testcontainers-terraform-locks"
+          
+          # Export for subsequent jobs
+          echo "backend_bucket=${BACKEND_BUCKET}" >> $GITHUB_OUTPUT
+          echo "backend_table=${BACKEND_TABLE}" >> $GITHUB_OUTPUT
 
   generate-runner-token:
     name: Generate GitHub Runner Token
@@ -75,7 +96,7 @@ jobs:
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: generate-runner-token
+    needs: [setup-backend, generate-runner-token]
     permissions:
       id-token: write       # Required for OIDC
       contents: read
@@ -123,11 +144,11 @@ jobs:
           cat > backend.tf <<EOF
           terraform {
             backend "s3" {
-              bucket         = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
+              bucket         = "${{ needs.setup-backend.outputs.backend_bucket }}"
               key            = "aws/ec2-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
               region         = "${{ env.AWS_REGION }}"
               encrypt        = true
-              dynamodb_table = "${{ secrets.TERRAFORM_LOCK_TABLE }}"
+              dynamodb_table = "${{ needs.setup-backend.outputs.backend_table }}"
             }
           }
           EOF
@@ -163,7 +184,7 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: [generate-runner-token, terraform-plan]
+    needs: [setup-backend, generate-runner-token, terraform-plan]
     permissions:
       id-token: write
       contents: read

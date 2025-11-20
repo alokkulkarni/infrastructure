@@ -1,17 +1,12 @@
 # Backend configuration for storing Terraform state in S3
-# Note: S3 bucket and DynamoDB table must be created before initializing
-# Run the setup script: scripts/setup-terraform-backend.sh
+# Note: This file will be generated dynamically by the GitHub Actions workflow
+# with environment-specific values. The naming convention is:
+# - Bucket: {project_name}-terraform-state-{aws_account_id}
+# - DynamoDB: {project_name}-terraform-locks
+# - State Key: aws/ec2-runner/{environment}/terraform.tfstate
+#
+# The setup-terraform-backend.sh script will create these resources
+# if they don't exist.
 
-terraform {
-  backend "s3" {
-    bucket         = "testcontainers-terraform-state"
-    key            = "aws/ec2-runner/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "testcontainers-terraform-locks"
-
-    # Uncomment these for additional security
-    # kms_key_id = "alias/terraform-state"
-    # acl        = "private"
-  }
-}
+# This file is intentionally left minimal - it will be overwritten
+# by the workflow with actual backend configuration values

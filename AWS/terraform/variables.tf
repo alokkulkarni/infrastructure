@@ -87,11 +87,11 @@ variable "github_repo" {
 }
 
 variable "terraform_state_bucket" {
-  description = "S3 bucket name for Terraform state (used for OIDC role permissions)"
+  description = "S3 bucket name for Terraform state - used ONLY for OIDC IAM role permissions. Value is derived automatically in workflows using: {project_name}-terraform-state-{aws_account_id}"
   type        = string
 }
 
 variable "terraform_lock_table" {
-  description = "DynamoDB table name for Terraform state locking (used for OIDC role permissions)"
+  description = "DynamoDB table name for Terraform state locking - used ONLY for OIDC IAM role permissions. Value is derived automatically in workflows using: {project_name}-terraform-locks"
   type        = string
 }
