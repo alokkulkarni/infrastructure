@@ -9,27 +9,7 @@ resource "aws_security_group" "ec2" {
   }
 }
 
-# Ingress Rules - HTTP (for nginx)
-resource "aws_vpc_security_group_ingress_rule" "http" {
-  security_group_id = aws_security_group.ec2.id
-  description       = "HTTP access"
-
-  from_port   = 80
-  to_port     = 80
-  ip_protocol = "tcp"
-  cidr_ipv4   = "0.0.0.0/0"
-}
-
-# Ingress Rules - HTTPS (for nginx)
-resource "aws_vpc_security_group_ingress_rule" "https" {
-  security_group_id = aws_security_group.ec2.id
-  description       = "HTTPS access"
-
-  from_port   = 443
-  to_port     = 443
-  ip_protocol = "tcp"
-  cidr_ipv4   = "0.0.0.0/0"
-}
+# Note: HTTP ingress from ALB is added in main.tf after ALB is created
 
 # Egress Rules - All traffic (needed for GitHub Actions runner)
 resource "aws_vpc_security_group_egress_rule" "all_traffic" {

@@ -79,7 +79,7 @@ locals {
   })
 }
 
-# EC2 Instance
+# EC2 Instance (in private subnet, accessed via ALB)
 resource "aws_instance" "main" {
   ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
   instance_type          = var.instance_type

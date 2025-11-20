@@ -19,13 +19,25 @@ variable "vpc_cidr" {
 }
 
 variable "availability_zone" {
-  description = "Availability zone for resources"
+  description = "Availability zone for private subnet"
   type        = string
+}
+
+variable "availability_zone_2" {
+  description = "Second availability zone for public subnet (ALB requirement)"
+  type        = string
+  default     = ""
 }
 
 variable "public_subnet_cidr" {
   description = "CIDR block for public subnet"
   type        = string
+}
+
+variable "public_subnet_2_cidr" {
+  description = "CIDR block for second public subnet (ALB requirement)"
+  type        = string
+  default     = ""
 }
 
 variable "private_subnet_cidr" {

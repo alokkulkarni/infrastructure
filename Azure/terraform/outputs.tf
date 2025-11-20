@@ -43,6 +43,16 @@ output "vm_public_ip" {
   value       = module.vm.vm_public_ip
 }
 
+output "nginx_url" {
+  description = "URL to access the Nginx reverse proxy server"
+  value       = "http://${module.vm.vm_public_ip}"
+}
+
+output "nginx_health_check" {
+  description = "URL for Nginx health check endpoint"
+  value       = "http://${module.vm.vm_public_ip}/health"
+}
+
 output "nsg_id" {
   description = "ID of the Network Security Group"
   value       = module.security.nsg_id

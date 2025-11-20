@@ -14,7 +14,7 @@ terraform {
 
 provider "azurerm" {
   features {}
-  
+
   # Skip automatic resource provider registration for dry runs
   skip_provider_registration = true
 }

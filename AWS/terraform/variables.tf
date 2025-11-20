@@ -28,15 +28,27 @@ variable "vpc_cidr" {
 }
 
 variable "availability_zone" {
-  description = "Availability zone for resources"
+  description = "Availability zone for private subnet"
   type        = string
   default     = "us-east-1a"
 }
 
+variable "availability_zone_2" {
+  description = "Second availability zone for public subnet (ALB requires 2 AZs)"
+  type        = string
+  default     = "us-east-1b"
+}
+
 variable "public_subnet_cidr" {
-  description = "CIDR block for public subnet"
+  description = "CIDR block for public subnet 1"
   type        = string
   default     = "10.0.1.0/24"
+}
+
+variable "public_subnet_2_cidr" {
+  description = "CIDR block for public subnet 2 (for ALB)"
+  type        = string
+  default     = "10.0.3.0/24"
 }
 
 variable "private_subnet_cidr" {

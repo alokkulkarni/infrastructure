@@ -221,17 +221,17 @@ runcmd:
         [ -n "$nginx_port" ] && [ "$nginx_port" != "<no value>" ] && port=$nginx_port
         [ "$nginx_enable" == "false" ] && return
         [ -z "$nginx_path" ] || [ "$nginx_path" == "<no value>" ] && nginx_path="/$container_name"
-        local config_file="$GENERATED_DIR/${container_name}.conf"
+        local config_file="$GENERATED_DIR/$${container_name}.conf"
         log "Generating config for $container_name (port: $port, path: $nginx_path)"
         cat > $config_file <<NGINXCONF
-    upstream ${container_name}_backend { server ${container_name}:${port}; }
+    upstream $${container_name}_backend { server $${container_name}:$${port}; }
     server {
         listen 80;
     NGINXCONF
         [ -n "$nginx_host" ] && [ "$nginx_host" != "<no value>" ] && echo "    server_name $nginx_host;" >> $config_file
         cat >> $config_file <<NGINXCONF
         location $nginx_path {
-            proxy_pass http://${container_name}_backend;
+            proxy_pass http://$${container_name}_backend;
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;

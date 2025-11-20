@@ -28,8 +28,23 @@ output "ec2_private_ip" {
   value       = module.ec2.private_ip
 }
 
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = module.alb.alb_dns_name
+}
+
+output "nginx_url" {
+  description = "URL to access the Nginx reverse proxy server (via ALB)"
+  value       = "http://${module.alb.alb_dns_name}"
+}
+
+output "nginx_health_check" {
+  description = "URL for Nginx health check endpoint"
+  value       = "http://${module.alb.alb_dns_name}/health"
+}
+
 output "bastion_public_ip" {
-  description = "Public IP of bastion host (if needed for SSH access)"
+  description = "Public IP of NAT Gateway (for reference)"
   value       = module.networking.nat_gateway_public_ip
 }
 
