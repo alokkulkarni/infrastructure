@@ -12,6 +12,10 @@ on:
           - dev
           - staging
           - prod
+      environment_tag:
+        description: 'Environment Tag (Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM) - Used for resource isolation and state management. Example: SIT-john-teamA-20251120-1430'
+        required: true
+        type: string
       location:
         description: 'Azure Region'
         required: true
@@ -22,6 +26,7 @@ env:
   TF_VERSION: '1.6.0'
   AZURE_LOCATION: ${{ github.event.inputs.location || 'eastus' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+  ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 
 jobs:
   setup-backend:
@@ -117,6 +122,7 @@ jobs:
           location     = "${{ env.AZURE_LOCATION }}"
           project_name = "testcontainers"
           environment  = "${{ env.ENVIRONMENT }}"
+          environment_tag = "${{ env.ENVIRONMENT_TAG }}"
           
           vnet_address_space    = ["10.0.0.0/16"]
           public_subnet_address_prefix   = ["10.0.1.0/24"]
@@ -126,8 +132,8 @@ jobs:
           admin_username = "azureuser"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           # OIDC Configuration
           github_org  = "${{ github.repository_owner }}"
@@ -143,7 +149,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
             }
           }
           EOF
@@ -218,6 +224,7 @@ jobs:
           location     = "${{ env.AZURE_LOCATION }}"
           project_name = "testcontainers"
           environment  = "${{ env.ENVIRONMENT }}"
+          environment_tag = "${{ env.ENVIRONMENT_TAG }}"
           
           vnet_address_space    = ["10.0.0.0/16"]
           public_subnet_address_prefix   = ["10.0.1.0/24"]
@@ -227,8 +234,8 @@ jobs:
           admin_username = "azureuser"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           # OIDC Configuration
           github_org  = "${{ github.repository_owner }}"
@@ -244,7 +251,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
             }
           }
           EOF
@@ -333,7 +340,7 @@ jobs:
             BLOB_EXISTS=$(az storage blob exists \
               --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
               --container-name tfstate \
-              --name azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate \
+              --name azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate \
               --auth-mode login \
               --query exists -o tsv)
             echo "state_exists=$BLOB_EXISTS" >> $GITHUB_OUTPUT
@@ -356,6 +363,7 @@ jobs:
           location      = "${{ env.AZURE_LOCATION }}"
           project_name  = "testcontainers"
           environment   = "${{ env.ENVIRONMENT }}"
+          environment_tag = "${{ env.ENVIRONMENT_TAG }}"
           
           vnet_address_space     = ["10.0.0.0/16"]
           public_subnet_prefix   = "10.0.1.0/24"
@@ -364,8 +372,8 @@ jobs:
           vm_size = "Standard_D2s_v3"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
-          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT }}"
-          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
           github_org                     = "${{ github.repository_owner }}"
           github_repo                    = "${{ github.event.repository.name }}"
@@ -379,14 +387,21 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
-              key                  = "azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               use_oidc             = true
             }
           }
           EOF
           
           terraform init
-          terraform destroy -auto-approve
+          
+          # Destroy all modules EXCEPT OIDC
+          terraform destroy \
+            -target=module.vm \
+            -target=module.security \
+            -target=module.networking \
+            -target=azurerm_resource_group.main \
+            -auto-approve
 
       - name: Clean up Terraform state
         if: always()
@@ -397,7 +412,7 @@ jobs:
             az storage blob delete \
               --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
               --container-name tfstate \
-              --name azure/vm-runner/${{ env.ENVIRONMENT }}/terraform.tfstate \
+              --name azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate \
               --auth-mode login || true
           fi
 

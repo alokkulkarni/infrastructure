@@ -8,6 +8,11 @@ variable "environment" {
   type        = string
 }
 
+variable "environment_tag" {
+  description = "Environment tag for resource isolation"
+  type        = string
+}
+
 variable "location" {
   description = "Azure region"
   type        = string

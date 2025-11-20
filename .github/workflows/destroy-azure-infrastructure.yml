@@ -12,6 +12,10 @@ on:
           - dev
           - staging
           - prod
+      environment_tag:
+        description: 'Environment Tag (Must match the tag used during deployment. Format: SIT-USERID-TEAMID-YYYYMMDD-HHMM)'
+        required: true
+        type: string
       confirm_destroy:
         description: 'Type "destroy" to confirm'
         required: true
@@ -20,6 +24,7 @@ on:
 env:
   TF_VERSION: '1.6.0'
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+  ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 
 jobs:
   setup-backend:
@@ -104,7 +109,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
             }
           }
           EOF
@@ -126,7 +131,12 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
         run: |
+          # Destroy all modules EXCEPT OIDC to preserve authentication
           terraform destroy \
+            -target=module.vm \
+            -target=module.security \
+            -target=module.networking \
+            -target=azurerm_resource_group.main \
             -auto-approve \
             -input=false
 
@@ -134,4 +144,16 @@ jobs:
         run: |
           echo "## 🗑️ Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
           echo "Environment: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "Environment Tag: ${{ env.ENVIRONMENT_TAG }}" >> $GITHUB_STEP_SUMMARY
           echo "Status: Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Destroyed:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Virtual Machine (GitHub Runner)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Network Security Groups" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Virtual Network" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Resource Group" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Preserved:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 OIDC Configuration (Shared across environments)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 Backend Storage Account" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 Backend Resource Group" >> $GITHUB_STEP_SUMMARY

@@ -22,16 +22,21 @@ provider "azurerm" {
 provider "azuread" {
 }
 
+locals {
+  common_tags = {
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
+  }
+}
+
 # Resource Group
 resource "azurerm_resource_group" "main" {
   name     = "${var.project_name}-${var.environment}-rg"
   location = var.location
 
-  tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
-  }
+  tags = local.common_tags
 }
 
 # OIDC Module for GitHub Actions
@@ -40,6 +45,7 @@ module "oidc" {
 
   project_name    = var.project_name
   environment     = var.environment
+  environment_tag = var.environment_tag
   location        = var.location
   github_org      = var.github_org
   github_repo     = var.github_repo
@@ -53,6 +59,7 @@ module "networking" {
 
   project_name                  = var.project_name
   environment                   = var.environment
+  environment_tag               = var.environment_tag
   location                      = var.location
   resource_group_name           = azurerm_resource_group.main.name
   vnet_address_space            = var.vnet_address_space
@@ -66,6 +73,7 @@ module "security" {
 
   project_name        = var.project_name
   environment         = var.environment
+  environment_tag     = var.environment_tag
   location            = var.location
   resource_group_name = azurerm_resource_group.main.name
   private_subnet_id   = module.networking.private_subnet_id
@@ -77,6 +85,7 @@ module "vm" {
 
   project_name        = var.project_name
   environment         = var.environment
+  environment_tag     = var.environment_tag
   location            = var.location
   resource_group_name = azurerm_resource_group.main.name
   private_subnet_id   = module.networking.private_subnet_id
