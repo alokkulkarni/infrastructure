@@ -88,9 +88,13 @@ jobs:
         with:
           github-token: ${{ secrets.PAT_TOKEN }}
           script: |
+            // Parse the runner_repository input (e.g., "alokkulkarni/sit-test-repo")
+            const runnerRepo = '${{ github.event.inputs.runner_repository }}';
+            const [owner, repo] = runnerRepo.split('/');
+            
             const response = await github.rest.actions.createRegistrationTokenForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo
+              owner: owner,
+              repo: repo
             });
             core.setOutput('token', response.data.token);
             core.setSecret(response.data.token);
