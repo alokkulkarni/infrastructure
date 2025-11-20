@@ -117,6 +117,12 @@ jobs:
           github_repo_url      = "https://github.com/${{ github.repository }}"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}"]
+          
+          # OIDC Configuration (backend resource names derived from setup-backend job)
+          github_org             = "${{ github.repository_owner }}"
+          github_repo            = "${{ github.event.repository.name }}"
+          terraform_state_bucket = "${{ needs.setup-backend.outputs.backend_bucket }}"
+          terraform_lock_table   = "${{ needs.setup-backend.outputs.backend_table }}"
           EOF
 
       - name: Update backend configuration
@@ -175,12 +181,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-BackendCleanup
 
       - name: Optional backend cleanup message
         run: |
