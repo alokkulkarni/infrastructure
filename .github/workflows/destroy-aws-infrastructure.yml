@@ -48,6 +48,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-DestroyBackend
+          role-duration-seconds: 28800  # 8 hours session
 
       - name: Derive backend configuration
         id: backend
@@ -98,6 +99,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-TerraformDestroy
+          role-duration-seconds: 28800  # 8 hours session
 
       - name: Create terraform.tfvars
         working-directory: AWS/terraform
@@ -187,6 +189,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-BackendCleanup
+          role-duration-seconds: 28800  # 8 hours session
 
       - name: Optional backend cleanup message
         run: |
