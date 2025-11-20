@@ -516,6 +516,49 @@ echo "  Runner Name: $RUNNER_NAME"
 echo "  Runner Labels: $RUNNER_LABELS"
 echo "  Token provided: $(if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
+# Test GitHub connectivity before attempting registration
+echo ""
+echo "======================================"
+echo "Testing GitHub Connectivity..."
+echo "======================================"
+
+# Test DNS
+echo "Testing DNS resolution for github.com..."
+if nslookup github.com > /dev/null 2>&1; then
+    echo "✅ DNS resolution successful"
+else
+    echo "❌ DNS resolution failed - cannot reach GitHub"
+    exit 1
+fi
+
+# Test HTTPS connectivity
+echo "Testing HTTPS connection to github.com..."
+if curl -Is https://github.com --connect-timeout 10 | head -1; then
+    echo "✅ HTTPS connection successful"
+else
+    echo "❌ HTTPS connection failed - cannot reach GitHub"
+    echo "Checking route table..."
+    ip route show
+    echo "Checking NAT gateway connectivity..."
+    ping -c 3 8.8.8.8 || echo "Cannot reach internet"
+    exit 1
+fi
+
+# Test GitHub API
+echo "Testing GitHub API..."
+if curl -s https://api.github.com/zen --connect-timeout 10; then
+    echo ""
+    echo "✅ GitHub API accessible"
+else
+    echo "❌ GitHub API not accessible"
+    exit 1
+fi
+
+echo "======================================"
+echo "✅ All connectivity tests passed"
+echo "======================================"
+echo ""
+
 # If token is not provided via Terraform, try to generate it
 if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
     echo "❌ ERROR: No runner token provided. Runner will need to be configured manually."
