@@ -32,9 +32,9 @@ resource "aws_iam_role" "ec2" {
   })
 
   tags = {
-    Name                = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-role"
-    Environment         = var.environment
-    EnvironmentTag      = var.environment_tag
+    Name           = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-role"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -69,7 +69,7 @@ resource "aws_iam_role_policy" "ec2" {
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-profile"
   role = aws_iam_role.ec2.name
-  
+
   tags = {
     Name           = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-profile"
     Environment    = var.environment
