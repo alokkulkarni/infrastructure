@@ -144,23 +144,23 @@ GITHUB_REACHABLE=false
 MAX_RETRIES=30
 RETRY_DELAY=10
 
-for i in $$(seq 1 $${MAX_RETRIES}); do
-    log "Attempt $$i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
+for i in $(seq 1 $${MAX_RETRIES}); do
+    log "Attempt $i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
     if timeout 10 curl -s -o /dev/null -w "%%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
         log "✅ GitHub API is reachable"
         GITHUB_REACHABLE=true
         break
     else
         log "⚠️ GitHub API not reachable yet, waiting $${RETRY_DELAY}s..."
-        if [ $$i -lt $${MAX_RETRIES} ]; then
+        if [ $i -lt $${MAX_RETRIES} ]; then
             sleep $${RETRY_DELAY}
         fi
     fi
 done
 
-if [ "$$GITHUB_REACHABLE" = false ]; then
+if [ "$${GITHUB_REACHABLE}" = false ]; then
     log "❌ ERROR: GitHub API unreachable after $${MAX_RETRIES} attempts (5 minutes)"
-    log "Routes: $$(ip route)"
+    log "Routes: $(ip route)"
     log "DNS resolution test:"
     nslookup api.github.com || true
     log "This likely indicates NAT Gateway or routing issues"
@@ -173,7 +173,7 @@ log "✅ Internet connectivity confirmed, proceeding with runner configuration"
 log "Authenticating GitHub CLI with PAT..."
 echo "$${GITHUB_PAT}" | gh auth login --with-token
 
-if [ $$? -eq 0 ]; then
+if [ $? -eq 0 ]; then
     log "✅ GitHub CLI authenticated successfully"
     gh auth status
 else
@@ -222,8 +222,6 @@ sudo -u runner ./config.sh \
     --labels "$${RUNNER_LABELS}" \
     --unattended \
     --replace 2>&1 | tee -a /var/log/runner-config.log
-
-CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
 
 CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
 
@@ -310,7 +308,7 @@ generate_config() {
     
     cat > $config_file <<NGINXEOF
 location $path {
-    proxy_pass http://\$${container_name}:\$${port};
+    proxy_pass http://$container_name:$port;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
