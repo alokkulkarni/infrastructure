@@ -78,6 +78,10 @@ module "ec2" {
   github_repo_url      = var.github_repo_url
   github_runner_name   = var.github_runner_name
   github_runner_labels = var.github_runner_labels
+
+  # Explicit dependency: Wait for NAT Gateway to be fully operational
+  # This ensures the private subnet has internet connectivity before EC2 starts
+  depends_on = [module.networking]
 }
 
 # Application Load Balancer

@@ -132,6 +132,40 @@ log "  Runner Name: $RUNNER_NAME"
 log "  Runner Labels: $RUNNER_LABELS"
 log "  PAT provided: $(if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
+# Wait for NAT Gateway to be fully operational before attempting GitHub API calls
+log "======================================"
+log "Testing GitHub Connectivity"
+log "======================================"
+
+GITHUB_REACHABLE=false
+MAX_RETRIES=30
+RETRY_DELAY=10
+
+for i in $(seq 1 $MAX_RETRIES); do
+    log "Attempt $i/$MAX_RETRIES: Testing GitHub API connectivity..."
+    if timeout 10 curl -s -o /dev/null -w "%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
+        log "✅ GitHub API is reachable"
+        GITHUB_REACHABLE=true
+        break
+    else
+        log "⚠️ GitHub API not reachable yet, waiting ${RETRY_DELAY}s..."
+        if [ $i -lt $MAX_RETRIES ]; then
+            sleep $RETRY_DELAY
+        fi
+    fi
+done
+
+if [ "$GITHUB_REACHABLE" = false ]; then
+    log "❌ ERROR: GitHub API unreachable after $MAX_RETRIES attempts (5 minutes)"
+    log "Routes: $(ip route)"
+    log "DNS resolution test:"
+    nslookup api.github.com || true
+    log "This likely indicates NAT Gateway or routing issues"
+    exit 1
+fi
+
+log "✅ Internet connectivity confirmed, proceeding with runner configuration"
+
 # Configure and start runner using PAT + gh CLI approach
 if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
     log "Authenticating GitHub CLI with PAT..."
