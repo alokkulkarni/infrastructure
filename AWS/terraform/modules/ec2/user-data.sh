@@ -95,8 +95,9 @@ cd $RUNNER_DIR
 
 # Download the latest runner package
 log "Downloading GitHub Actions Runner..."
-RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/v//') || RUNNER_VERSION="2.311.0"
-log "Runner version: $RUNNER_VERSION"
+# Using 2.329.0 explicitly - DO NOT use "latest" as 2.330.0 has IsHostedServer detection bug
+RUNNER_VERSION="2.329.0"
+log "Runner version: $RUNNER_VERSION (using 2.329.0 due to 2.330.0 bug)"
 
 curl -o actions-runner-linux-x64-$RUNNER_VERSION.tar.gz -L \
   https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz || {

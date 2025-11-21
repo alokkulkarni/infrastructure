@@ -1,9 +1,13 @@
 # GitHub Actions Runner AMI Build Guide
 
 **Last Updated:** 2025-11-21  
-**Runner Version:** 2.330.0 (Minimum Required: 2.310.0)  
+**Runner Version:** 2.329.0 (Downgraded from 2.330.0 due to IsHostedServer detection bug)  
 **Base OS:** Ubuntu 22.04 LTS  
 **Region:** eu-west-2 (London)
+
+**⚠️ IMPORTANT:** Do NOT use runner 2.330.0 - it has a bug in PR #4086 where the IsHostedServer detection logic  
+incorrectly identifies self-hosted runners as hosted infrastructure, causing registration failures with  
+404 errors on deprecated API endpoints. Use 2.329.0 until the bug is fixed.
 
 ---
 
@@ -215,7 +219,7 @@ ls -la /home/runner/
 
 ## Phase 5: Install GitHub Actions Runner
 
-### Step 5.1: Download Latest Runner (2.330.0)
+### Step 5.1: Download Runner 2.329.0 (NOT 2.330.0!)
 ```bash
 # Switch to runner user
 sudo su - runner
@@ -223,8 +227,8 @@ sudo su - runner
 # Navigate to actions-runner directory
 cd /home/runner/actions-runner
 
-# Download runner v2.330.0 (or latest from GitHub)
-RUNNER_VERSION="2.330.0"
+# Download runner v2.329.0 (DO NOT use 2.330.0 - has IsHostedServer bug)
+RUNNER_VERSION="2.329.0"
 curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz -L \
     https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
@@ -233,11 +237,8 @@ ls -lh actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 # Should show ~150-200 MB file
 ```
 
-**Note:** To check for the absolute latest version:
-```bash
-# Get latest version from GitHub API
-curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+'
-```
+**⚠️ CRITICAL:** Do NOT use the "latest" version command as it will download 2.330.0 which has a bug.  
+Stick with 2.329.0 explicitly until GitHub fixes the IsHostedServer detection issue in 2.331.0+.
 
 ### Step 5.2: Verify Download (Optional but Recommended)
 ```bash
@@ -245,8 +246,9 @@ curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '
 # Compare with downloaded file
 sha256sum actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
-# Official SHA256 for 2.330.0:
-# (Check https://github.com/actions/runner/releases/tag/v2.330.0)
+# Official SHA256 for 2.329.0:
+# 194f1e1e4bd02f80b7e9633fc546084d8d4e19f3928a324d512ea53430102e1d
+# (Check https://github.com/actions/runner/releases/tag/v2.329.0)
 ```
 
 ### Step 5.3: Extract Runner
@@ -364,7 +366,7 @@ bash /tmp/verify-ami-build.sh
 All checks should show:
 - ✅ Docker 27.x or newer
 - ✅ Node.js 20.x
-- ✅ Runner version 2.330.0
+- ✅ Runner version 2.329.0
 - ✅ Runner user can execute docker commands
 - ✅ All required files present in /home/runner/actions-runner/
 
@@ -405,10 +407,10 @@ sudo find /var/log -type f -exec truncate -s 0 {} \;
 ### Step 7.4: Final Verification
 ```bash
 # Ensure runner directory is intact
-ls -la /home/runner/actions-runner/config.sh
+sudo ls -la /home/runner/actions-runner/config.sh
 
 # Ensure ownership is correct
-stat -c "%U:%G" /home/runner/actions-runner
+sudo stat -c "%U:%G" /home/runner/actions-runner
 # Should output: runner:runner
 ```
 
@@ -432,7 +434,7 @@ stat -c "%U:%G" /home/runner/actions-runner
 2. **Actions** → **Image and templates** → **Create image**
 
 3. **Configure AMI:**
-   - **Image name:** `github-runner-ubuntu-2204-v2.330.0-20251121`
+   - **Image name:** `github-runner-ubuntu-2204-v2.329.0-YYYYMMDD` (replace YYYYMMDD with current date)
      - Format: `github-runner-ubuntu-<OS_VERSION>-v<RUNNER_VERSION>-<DATE>`
    
    - **Image description:**
@@ -464,7 +466,7 @@ stat -c "%U:%G" /home/runner/actions-runner
 
 ### Step 8.3: Wait for AMI Creation
 1. Navigate to **EC2 → Images → AMIs**
-2. Find your AMI: `github-runner-ubuntu-2204-v2.330.0-20251121`
+2. Find your AMI: `github-runner-ubuntu-2204-v2.329.0-YYYYMMDD`
 3. Status will show **pending** → **available** (~5-10 minutes)
 4. **Do not proceed until status is "available"**
 
@@ -508,7 +510,7 @@ git add .github/workflows/deploy-aws-infrastructure-oidc.yml
 # OR
 git add AWS/terraform/environments/sit/terraform.tfvars
 
-git commit -m "chore: Update AMI ID to v2.330.0 (ami-0f8a3d99e5b1234ab)"
+git commit -m "chore: Update AMI ID to v2.329.0 (ami-0f8a3d99e5b1234ab)"
 git push origin main
 ```
 
@@ -635,7 +637,7 @@ aws ec2 get-console-output --instance-id <instance-id> --output text
 ```bash
 # Re-extract runner
 cd /home/runner/actions-runner
-sudo -u runner tar xzf actions-runner-linux-x64-2.330.0.tar.gz
+sudo -u runner tar xzf actions-runner-linux-x64-2.329.0.tar.gz
 ```
 
 ### Issue: Docker Permission Denied
@@ -653,14 +655,14 @@ sudo usermod -aG docker runner
 **Format:** `github-runner-ubuntu-<OS>-v<RUNNER>-<DATE>`
 
 **Examples:**
-- `github-runner-ubuntu-2204-v2.330.0-20251121`
+- `github-runner-ubuntu-2204-v2.329.0-YYYYMMDD`
 - `github-runner-ubuntu-2204-v2.331.0-20251201`
 
 **Tags:**
 - `Name`: Full AMI name
 - `Environment`: `production` or `sit`
 - `ManagedBy`: `terraform`
-- `RunnerVersion`: `2.330.0`
+- `RunnerVersion`: `2.329.0`
 - `OS`: `Ubuntu-22.04`
 - `BuildDate`: `YYYYMMDD`
 
@@ -707,7 +709,8 @@ sudo usermod -aG docker runner
 ## Reference
 
 **Runner Version History:**
-- 2.330.0 (2025-11-21) - Current, API compatible ✅
+- 2.329.0 (2024-10-14) - Recommended, no IsHostedServer bug ✅
+- 2.330.0 (2025-11-21) - ⚠️ DO NOT USE - Has IsHostedServer detection bug (PR #4086) ❌
 - 2.321.0 (User claimed but was actually older) ❌
 - 2.310.0 (Minimum required for correct API) ⚠️
 
@@ -732,7 +735,7 @@ For experienced users, here's a complete install script:
 
 set -e
 
-RUNNER_VERSION="2.330.0"
+RUNNER_VERSION="2.329.0"
 
 # Update system
 sudo apt-get update -y && sudo apt-get upgrade -y
