@@ -5,7 +5,8 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-vpc"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-vpc"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -14,7 +15,8 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-igw"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-igw"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -26,8 +28,9 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-public-subnet-1"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-public-subnet-1"
     Type = "Public"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -40,8 +43,9 @@ resource "aws_subnet" "public_2" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-public-subnet-2"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-public-subnet-2"
     Type = "Public"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -52,8 +56,9 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zone
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-private-subnet"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-private-subnet"
     Type = "Private"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -62,7 +67,8 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-nat-eip"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-nat-eip"
+    EnvironmentTag = var.environment_tag
   }
 
   depends_on = [aws_internet_gateway.main]
@@ -74,7 +80,8 @@ resource "aws_nat_gateway" "main" {
   subnet_id     = aws_subnet.public.id
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-nat-gateway"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-nat-gateway"
+    EnvironmentTag = var.environment_tag
   }
 
   depends_on = [aws_internet_gateway.main]
@@ -90,7 +97,8 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-public-rt"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-public-rt"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -104,7 +112,8 @@ resource "aws_route_table" "private" {
   }
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-private-rt"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-private-rt"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -134,7 +143,8 @@ resource "aws_vpc_endpoint" "s3" {
   ]
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-s3-endpoint"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-s3-endpoint"
+    EnvironmentTag = var.environment_tag
   }
 }
 

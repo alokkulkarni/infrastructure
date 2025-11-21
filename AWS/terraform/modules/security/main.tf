@@ -1,11 +1,12 @@
 # Security Group for EC2 Instance
 resource "aws_security_group" "ec2" {
-  name        = "${var.project_name}-${var.environment}-ec2-sg"
+  name        = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-sg"
   description = "Security group for EC2 instance with Docker and GitHub Actions runner"
   vpc_id      = var.vpc_id
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-ec2-sg"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-ec2-sg"
+    EnvironmentTag = var.environment_tag
   }
 }
 

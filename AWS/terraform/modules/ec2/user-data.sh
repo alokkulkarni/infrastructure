@@ -171,7 +171,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
     log "Authenticating GitHub CLI with PAT..."
     echo "$GITHUB_PAT" | gh auth login --with-token
     
-    if [ $? -eq 0 ]; then
+    if [ $$? -eq 0 ]; then
         log "✅ GitHub CLI authenticated successfully"
         gh auth status
         
@@ -188,7 +188,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
             log "Token generation output: $RUNNER_TOKEN"
         else
             log "✅ Runner token generated successfully"
-            log "Token length: ${#RUNNER_TOKEN} characters"
+            log "Token length: $${#RUNNER_TOKEN} characters"
             
             # Clear PAT from environment for security
             unset GITHUB_PAT
@@ -205,7 +205,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
                 --unattended \
                 --replace 2>&1 | tee -a /var/log/runner-config.log
             
-            CONFIG_EXIT_CODE=${PIPESTATUS[0]}
+            CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
             
             if [ $CONFIG_EXIT_CODE -eq 0 ]; then
                 log "✅ Runner configured successfully"

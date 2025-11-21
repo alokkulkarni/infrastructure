@@ -1,6 +1,8 @@
 # Application Load Balancer for EC2 in private subnet
+# Note: ALB names are limited to 32 characters by AWS
+# We use name_prefix to automatically generate unique names and handle truncation
 resource "aws_lb" "main" {
-  name               = "${var.project_name}-${var.environment}-alb"
+  name_prefix        = substr("${var.project_name}-${var.environment}-", 0, 6)
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
@@ -10,8 +12,9 @@ resource "aws_lb" "main" {
   enable_http2               = true
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-alb"
+    Name        = "${var.project_name}-${var.environment}-${var.environment_tag}-alb"
     Environment = var.environment
+    EnvironmentTag = var.environment_tag
     Project     = var.project_name
     ManagedBy   = "Terraform"
   }
@@ -19,12 +22,13 @@ resource "aws_lb" "main" {
 
 # Security Group for ALB
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-${var.environment}-alb-sg"
+  name        = "${var.project_name}-${var.environment}-${var.environment_tag}-alb-sg"
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-alb-sg"
+    Name = "${var.project_name}-${var.environment}-${var.environment_tag}-alb-sg"
+    EnvironmentTag = var.environment_tag
   }
 }
 
@@ -60,8 +64,10 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_ec2" {
 }
 
 # Target Group for EC2 instances
+# Note: Target group names are limited to 32 characters by AWS
+# We use name_prefix to automatically generate unique names and handle truncation
 resource "aws_lb_target_group" "ec2" {
-  name     = "${var.project_name}-${var.environment}-tg"
+  name_prefix = substr("${var.project_name}-${var.environment}-", 0, 6)
   port     = 80
   protocol = "HTTP"
   vpc_id   = var.vpc_id
@@ -80,8 +86,9 @@ resource "aws_lb_target_group" "ec2" {
   deregistration_delay = 30
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-tg"
+    Name        = "${var.project_name}-${var.environment}-${var.environment_tag}-tg"
     Environment = var.environment
+    EnvironmentTag = var.environment_tag
     Project     = var.project_name
   }
 }
