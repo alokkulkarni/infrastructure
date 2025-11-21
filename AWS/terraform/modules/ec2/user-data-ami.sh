@@ -43,6 +43,15 @@ log "AWS CLI: $(aws --version 2>&1 || echo 'NOT FOUND')"
 log "Node.js: $(node --version 2>&1 || echo 'NOT FOUND')"
 log "Python: $(python3 --version 2>&1 || echo 'NOT FOUND')"
 log "Git: $(git --version 2>&1 || echo 'NOT FOUND')"
+log "jq: $(jq --version 2>&1 || echo 'NOT FOUND')"
+
+# Install jq if not present (required for runner config verification)
+if ! command -v jq &> /dev/null; then
+    log "Installing jq..."
+    apt-get update -qq
+    apt-get install -y jq -qq
+    log "✅ jq installed"
+fi
 
 # Check if runner user exists
 if id "runner" &>/dev/null; then
@@ -53,11 +62,34 @@ else
     usermod -aG docker runner
 fi
 
-# Verify runner directory
+# Verify runner directory and ownership
 RUNNER_DIR="/home/runner/actions-runner"
 if [ -d "$${RUNNER_DIR}" ]; then
     log "✅ Runner directory exists: $${RUNNER_DIR}"
     log "Contents: $(ls -la $${RUNNER_DIR} | wc -l) files"
+    
+    # Ensure proper ownership
+    chown -R runner:runner $${RUNNER_DIR}
+    log "✅ Runner directory ownership verified"
+    
+    # Verify runner version
+    if [ -f "$${RUNNER_DIR}/config.sh" ]; then
+        RUNNER_VERSION=$(cd $${RUNNER_DIR} && sudo -u runner ./config.sh --version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+        if [ "$${RUNNER_VERSION}" != "unknown" ]; then
+            log "✅ Runner version: $${RUNNER_VERSION}"
+            
+            # Verify version is >= 2.310.0 (required for correct API endpoint)
+            REQUIRED_VERSION="2.310.0"
+            if [ "$(printf '%s\n' "$${REQUIRED_VERSION}" "$${RUNNER_VERSION}" | sort -V | head -n1)" = "$${REQUIRED_VERSION}" ]; then
+                log "✅ Runner version is compatible (>= 2.310.0)"
+            else
+                log "⚠️  WARNING: Runner version $${RUNNER_VERSION} is older than recommended 2.310.0"
+                log "⚠️  May cause registration issues with deprecated API endpoints"
+            fi
+        else
+            log "⚠️  Could not determine runner version"
+        fi
+    fi
 else
     log "❌ Runner directory not found - AMI may not be properly built"
     exit 1
@@ -100,8 +132,15 @@ fi
 log "Configuring runner..."
 cd $${RUNNER_DIR}
 
+# Run config.sh with verbose output for debugging
 sudo -u runner bash <<RUNNEREOF
 set -e
+
+echo "Starting runner configuration..."
+echo "Runner directory: $(pwd)"
+echo "Config script: $(ls -lh config.sh)"
+echo ""
+
 ./config.sh \
     --url $${GITHUB_REPO_URL} \
     --token $${RUNNER_TOKEN} \
@@ -110,22 +149,45 @@ set -e
     --unattended \
     --replace
 
-if [ \$? -eq 0 ]; then
+CONFIG_EXIT_CODE=\$?
+
+if [ \$CONFIG_EXIT_CODE -eq 0 ]; then
     echo "✅ Runner configuration successful"
     
-    # Verify registration file
+    # Verify registration file with jq
     if [ -f ".runner" ]; then
         echo "✅ Runner registration file created:"
-        cat .runner | jq '.' 2>/dev/null || cat .runner
+        if command -v jq &> /dev/null; then
+            cat .runner | jq '.'
+        else
+            cat .runner
+        fi
+    else
+        echo "⚠️  WARNING: .runner file not found after configuration"
+    fi
+    
+    # Verify credentials file
+    if [ -f ".credentials" ]; then
+        echo "✅ Credentials file created"
+    else
+        echo "⚠️  WARNING: .credentials file not found"
     fi
 else
-    echo "❌ Runner configuration failed"
+    echo "❌ Runner configuration failed with exit code \$CONFIG_EXIT_CODE"
+    echo "Last 50 lines of config output:"
+    tail -50 /var/log/user-data.log 2>/dev/null || echo "Could not read log"
     exit 1
 fi
 RUNNEREOF
 
-if [ $${?} -ne 0 ]; then
-    log "❌ Failed to configure runner"
+CONFIG_RESULT=$${?}
+if [ $${CONFIG_RESULT} -ne 0 ]; then
+    log "❌ Failed to configure runner (exit code: $${CONFIG_RESULT})"
+    log "This usually indicates:"
+    log "  1. Invalid or expired registration token"
+    log "  2. Network connectivity issues"
+    log "  3. Incorrect repository URL"
+    log "  4. Runner version incompatibility"
     exit 1
 fi
 
