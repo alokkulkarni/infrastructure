@@ -21,7 +21,7 @@ log "======================================"
 
 # Runner configuration variables from Terraform
 GITHUB_REPO_URL="${github_repo_url}"
-RUNNER_TOKEN="${github_runner_token}"
+GITHUB_PAT="${github_pat}"
 RUNNER_NAME="${github_runner_name}"
 RUNNER_LABELS="${github_runner_labels}"
 
@@ -29,7 +29,7 @@ log "Configuration:"
 log "  Repository: $${GITHUB_REPO_URL}"
 log "  Runner Name: $${RUNNER_NAME}"
 log "  Runner Labels: $${RUNNER_LABELS}"
-log "  Token provided: $(if [ -n "$${RUNNER_TOKEN}" ] && [ "$${RUNNER_TOKEN}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+log "  PAT provided: $(if [ -n "$${GITHUB_PAT}" ] && [ "$${GITHUB_PAT}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
 # Verify pre-installed packages
 log "======================================"
@@ -44,6 +44,7 @@ log "Node.js: $(node --version 2>&1 || echo 'NOT FOUND')"
 log "Python: $(python3 --version 2>&1 || echo 'NOT FOUND')"
 log "Git: $(git --version 2>&1 || echo 'NOT FOUND')"
 log "jq: $(jq --version 2>&1 || echo 'NOT FOUND')"
+log "gh CLI: $(gh --version 2>&1 | head -1 || echo 'NOT FOUND')"
 
 # Install jq if not present (required for runner config verification)
 if ! command -v jq &> /dev/null; then
@@ -51,6 +52,19 @@ if ! command -v jq &> /dev/null; then
     apt-get update -qq
     apt-get install -y jq -qq
     log "✅ jq installed"
+fi
+
+# Install gh CLI if not present (required for token generation)
+if ! command -v gh &> /dev/null; then
+    log "Installing GitHub CLI (gh)..."
+    apt-get update -qq
+    # Install gh CLI
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    apt-get update -qq
+    apt-get install -y gh -qq
+    log "✅ GitHub CLI installed: $(gh --version | head -1)"
 fi
 
 # Check if runner user exists
@@ -114,12 +128,45 @@ log "======================================"
 log "Configuring GitHub Actions Runner"
 log "======================================"
 
-if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
-    log "❌ ERROR: No runner token provided"
-    log "Runner cannot be registered without a token"
-    log "Please provide github_runner_token in terraform.tfvars"
+if [ -z "$${GITHUB_PAT}" ] || [ "$${GITHUB_PAT}" == "" ]; then
+    log "❌ ERROR: No GitHub PAT provided"
+    log "Runner cannot be registered without a PAT"
+    log "Please provide github_pat in terraform.tfvars"
     exit 1
 fi
+
+# Authenticate gh CLI with PAT
+log "Authenticating GitHub CLI with PAT..."
+echo "$${GITHUB_PAT}" | gh auth login --with-token
+
+if [ $? -eq 0 ]; then
+    log "✅ GitHub CLI authenticated successfully"
+    gh auth status
+else
+    log "❌ GitHub CLI authentication failed"
+    exit 1
+fi
+
+# Extract owner and repo from URL
+REPO_FULL=$(echo "$${GITHUB_REPO_URL}" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+log "Extracted repository: $${REPO_FULL}"
+
+# Generate runner registration token using gh CLI (matches test script)
+log "Generating runner registration token via gh CLI..."
+RUNNER_TOKEN=$(gh api --method POST "repos/$${REPO_FULL}/actions/runners/registration-token" --jq '.token' 2>&1)
+
+if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
+    log "❌ ERROR: Failed to generate runner token"
+    log "Token generation output: $${RUNNER_TOKEN}"
+    exit 1
+else
+    log "✅ Runner token generated successfully"
+    log "Token length: $${#RUNNER_TOKEN} characters"
+fi
+
+# Clear PAT from environment for security
+unset GITHUB_PAT
+log "✅ PAT cleared from environment"
 
 # Check if runner is already configured
 if [ -f "$${RUNNER_DIR}/.runner" ]; then

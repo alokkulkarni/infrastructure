@@ -60,3 +60,10 @@ variable "github_runner_labels" {
   description = "Labels for the GitHub Actions runner"
   type        = list(string)
 }
+
+variable "github_pat" {
+  description = "GitHub Personal Access Token for runner token generation via gh CLI"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

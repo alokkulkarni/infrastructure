@@ -195,6 +195,7 @@ jobs:
           github_runner_token  = "dummy-token-for-destroy"
           github_runner_name   = "aws-ec2-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "aws", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
+          github_pat           = "${{ secrets.PAT_TOKEN }}"
           
           # Custom AMI Configuration
           ami_id         = "${{ github.event.inputs.ami_id }}"

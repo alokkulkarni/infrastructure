@@ -99,6 +99,13 @@ variable "github_runner_labels" {
   default     = ["self-hosted", "aws", "linux"]
 }
 
+variable "github_pat" {
+  description = "GitHub Personal Access Token for runner token generation via gh CLI"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "github_org" {
   description = "GitHub organization or username"
   type        = string

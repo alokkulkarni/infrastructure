@@ -82,6 +82,7 @@ resource "aws_iam_instance_profile" "ec2" {
 locals {
   user_data_script = var.use_custom_ami ? "user-data-ami.sh" : "user-data.sh"
   user_data_template = templatefile("${path.module}/${local.user_data_script}", {
+    github_pat           = var.github_pat
     github_runner_token  = var.github_runner_token
     github_repo_url      = var.github_repo_url
     github_runner_name   = var.github_runner_name

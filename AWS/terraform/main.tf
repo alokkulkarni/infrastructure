@@ -73,6 +73,7 @@ module "ec2" {
   use_custom_ami       = var.use_custom_ami
   subnet_id            = module.networking.private_subnet_id
   security_group_ids   = [module.security.ec2_security_group_id]
+  github_pat           = var.github_pat
   github_runner_token  = var.github_runner_token
   github_repo_url      = var.github_repo_url
   github_runner_name   = var.github_runner_name

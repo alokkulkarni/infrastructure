@@ -74,7 +74,16 @@ apt-get upgrade -y || log "⚠️  Package upgrade had issues, continuing..."
 
 # Install minimal essential packages first (needed for runner setup)
 log "Installing minimal essential packages for runner..."
-apt-get install -y curl wget ca-certificates || log "⚠️  Some packages failed to install"
+apt-get install -y curl wget ca-certificates jq || log "⚠️  Some packages failed to install"
+
+# Install GitHub CLI (gh) - needed for token generation
+log "Installing GitHub CLI (gh)..."
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+apt-get update -qq
+apt-get install -y gh || log "⚠️  GitHub CLI installation had issues"
+log "✅ GitHub CLI installed: $(gh --version | head -1)"
 
 # ==============================================
 # PRIORITY: Configure GitHub Actions Runner FIRST
@@ -113,7 +122,7 @@ chown -R runner:runner $RUNNER_DIR
 
 # Runner configuration variables
 GITHUB_REPO_URL="${github_repo_url}"
-RUNNER_TOKEN="${github_runner_token}"
+GITHUB_PAT="${github_pat}"
 RUNNER_NAME="${github_runner_name}"
 RUNNER_LABELS="${github_runner_labels}"
 
@@ -121,32 +130,70 @@ log "Runner configuration:"
 log "  Repository URL: $GITHUB_REPO_URL"
 log "  Runner Name: $RUNNER_NAME"
 log "  Runner Labels: $RUNNER_LABELS"
-log "  Token provided: $(if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+log "  PAT provided: $(if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
-# Configure and start runner if token is available
-if [ -n "$RUNNER_TOKEN" ] && [ "$RUNNER_TOKEN" != "" ]; then
-    log "Configuring runner with provided token..."
-    
-    # Configure runner as runner user
-    su - runner -c "cd $RUNNER_DIR && ./config.sh --url $GITHUB_REPO_URL --token $RUNNER_TOKEN --name $RUNNER_NAME --labels $RUNNER_LABELS --unattended --replace"
+# Configure and start runner using PAT + gh CLI approach
+if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
+    log "Authenticating GitHub CLI with PAT..."
+    echo "$GITHUB_PAT" | gh auth login --with-token
     
     if [ $? -eq 0 ]; then
-        log "✅ Runner configured successfully"
+        log "✅ GitHub CLI authenticated successfully"
+        gh auth status
         
-        # Install and start runner service
-        cd $RUNNER_DIR
-        ./svc.sh install runner
-        ./svc.sh start
+        # Extract owner and repo from URL
+        REPO_FULL=$(echo "$GITHUB_REPO_URL" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+        log "Extracted repository: $REPO_FULL"
         
-        log "✅ Runner service started"
-        log "======================================"
-        log "GitHub Actions Runner Setup Complete!"
-        log "======================================"
+        # Generate runner registration token using gh CLI (matches test script)
+        log "Generating runner registration token via gh CLI..."
+        RUNNER_TOKEN=$(gh api --method POST "repos/$REPO_FULL/actions/runners/registration-token" --jq '.token' 2>&1)
+        
+        if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
+            log "❌ ERROR: Failed to generate runner token"
+            log "Token generation output: $RUNNER_TOKEN"
+        else
+            log "✅ Runner token generated successfully"
+            log "Token length: ${#RUNNER_TOKEN} characters"
+            
+            # Clear PAT from environment for security
+            unset GITHUB_PAT
+            log "✅ PAT cleared from environment"
+            
+            # Configure runner as runner user (direct execution, matches test script)
+            log "Configuring runner with generated token..."
+            cd $RUNNER_DIR
+            sudo -u runner ./config.sh \
+                --url "$GITHUB_REPO_URL" \
+                --token "$RUNNER_TOKEN" \
+                --name "$RUNNER_NAME" \
+                --labels "$RUNNER_LABELS" \
+                --unattended \
+                --replace 2>&1 | tee -a /var/log/runner-config.log
+            
+            CONFIG_EXIT_CODE=${PIPESTATUS[0]}
+            
+            if [ $CONFIG_EXIT_CODE -eq 0 ]; then
+                log "✅ Runner configured successfully"
+                
+                # Install and start runner service
+                cd $RUNNER_DIR
+                ./svc.sh install runner
+                ./svc.sh start
+                
+                log "✅ Runner service started"
+                log "======================================"
+                log "GitHub Actions Runner Setup Complete!"
+                log "======================================"
+            else
+                log "❌ Runner configuration failed"
+            fi
+        fi
     else
-        log "❌ Runner configuration failed"
+        log "❌ GitHub CLI authentication failed"
     fi
 else
-    log "❌ ERROR: No runner token provided. Runner will need to be configured manually."
+    log "❌ ERROR: No GitHub PAT provided. Runner will need to be configured manually."
     log "To configure manually, run as the runner user:"
     log "sudo su - runner"
     log "cd $RUNNER_DIR"

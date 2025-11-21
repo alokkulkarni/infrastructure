@@ -151,7 +151,22 @@ rm -rf aws awscliv2.zip
 aws --version  # Should show: aws-cli/2.x.x
 ```
 
-### Step 3.5: Install Node.js 20 LTS
+### Step 3.5: Install GitHub CLI (gh)
+```bash
+# Install GitHub CLI (required for PAT-based token generation)
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y gh
+
+# Verify
+gh --version  # Should show: gh version 2.x.x
+```
+
+**Why gh CLI?** The runner configuration uses GitHub PAT + gh CLI to generate registration tokens on-instance, eliminating token expiration issues and matching the proven test script pattern.
+
+### Step 3.6: Install Node.js 20 LTS
 ```bash
 # Install Node.js via NodeSource
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
@@ -162,7 +177,7 @@ node --version  # Should show: v20.x.x
 npm --version   # Should show: 10.x.x
 ```
 
-### Step 3.6: Install Python 3 and Pip
+### Step 3.7: Install Python 3 and Pip
 ```bash
 # Usually pre-installed on Ubuntu 22.04, but ensure latest
 sudo apt-get install -y python3 python3-pip
@@ -172,7 +187,7 @@ python3 --version  # Should show: Python 3.10.x
 pip3 --version
 ```
 
-### Step 3.7: Install Additional Build Tools
+### Step 3.8: Install Additional Build Tools
 ```bash
 # For various build scenarios
 sudo apt-get install -y \
@@ -313,6 +328,7 @@ echo "  Docker: $(docker --version)"
 echo "  Docker Compose: $(docker compose version)"
 echo "  Nginx: $(nginx -v 2>&1)"
 echo "  AWS CLI: $(aws --version)"
+echo "  gh CLI: $(gh --version | head -1)"
 echo "  Node.js: $(node --version)"
 echo "  npm: $(npm --version)"
 echo "  Python: $(python3 --version)"
@@ -363,7 +379,8 @@ bash /tmp/verify-ami-build.sh
 All checks should show:
 - ✅ Docker 27.x or newer
 - ✅ Node.js 20.x
-- ✅ Runner version 2.329.0
+- ✅ gh CLI 2.x or newer
+- ✅ Runner version 2.330.0
 - ✅ Runner user can execute docker commands
 - ✅ All required files present in /home/runner/actions-runner/
 
