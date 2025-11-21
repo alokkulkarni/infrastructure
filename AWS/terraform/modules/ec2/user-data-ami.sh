@@ -100,17 +100,17 @@ fi
 log "Configuring runner..."
 cd $${RUNNER_DIR}
 
-sudo -u runner bash <<'RUNNEREOF'
+sudo -u runner bash <<RUNNEREOF
 set -e
 ./config.sh \
-    --url ${GITHUB_REPO_URL} \
-    --token ${RUNNER_TOKEN} \
-    --name ${RUNNER_NAME} \
-    --labels ${RUNNER_LABELS} \
+    --url $${GITHUB_REPO_URL} \
+    --token $${RUNNER_TOKEN} \
+    --name $${RUNNER_NAME} \
+    --labels $${RUNNER_LABELS} \
     --unattended \
     --replace
 
-if [ $? -eq 0 ]; then
+if [ \$? -eq 0 ]; then
     echo "✅ Runner configuration successful"
     
     # Verify registration file
@@ -124,7 +124,7 @@ else
 fi
 RUNNEREOF
 
-if [ $? -ne 0 ]; then
+if [ $${?} -ne 0 ]; then
     log "❌ Failed to configure runner"
     exit 1
 fi
@@ -180,7 +180,7 @@ generate_config() {
     
     cat > $config_file <<NGINXEOF
 location $path {
-    proxy_pass http://\${container_name}:\${port};
+    proxy_pass http://\$${container_name}:\$${port};
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
