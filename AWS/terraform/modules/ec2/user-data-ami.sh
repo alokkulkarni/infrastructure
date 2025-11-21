@@ -351,6 +351,119 @@ AUTOCONFIG
 
 chmod +x /opt/nginx/auto-config.sh
 
+# Ensure Nginx container is running
+log "======================================"
+log "Starting Nginx Container"
+log "======================================"
+
+# Check if Nginx container exists
+if docker ps -a | grep -q " nginx$"; then
+    log "Nginx container exists, checking status..."
+    
+    if docker ps | grep -q " nginx$"; then
+        log "✅ Nginx container already running"
+    else
+        log "Nginx container stopped, starting..."
+        docker start nginx
+        sleep 3
+        
+        if docker ps | grep -q " nginx$"; then
+            log "✅ Nginx container started successfully"
+        else
+            log "❌ Failed to start existing Nginx container"
+        fi
+    fi
+else
+    log "Nginx container does not exist, creating and starting..."
+    
+    # Create base Nginx config with health endpoint
+    mkdir -p /opt/nginx/conf.d/auto-generated
+    cat > /opt/nginx/nginx.conf <<'NGINXCONF'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet/stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    keepalive_timeout 65;
+    gzip on;
+
+    # Docker DNS resolver
+    resolver 127.0.0.11 valid=30s;
+
+    # Default server with health check
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        # Health check endpoint for ALB
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+
+        # Default response
+        location / {
+            return 200 "Nginx reverse proxy is running\n";
+            add_header Content-Type text/plain;
+        }
+    }
+
+    # Include auto-generated and manual configurations
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/conf.d/auto-generated/*.conf;
+}
+NGINXCONF
+
+    # Start Nginx container
+    docker run -d \
+        --name nginx \
+        --restart unless-stopped \
+        --network app-network \
+        -p 80:80 \
+        -p 443:443 \
+        -v /opt/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
+        -v /opt/nginx/conf.d:/etc/nginx/conf.d:ro \
+        nginx:alpine
+    
+    # Wait for Nginx to start
+    sleep 5
+    
+    # Verify Nginx is running
+    if docker ps | grep -q " nginx$"; then
+        log "✅ Nginx container started successfully"
+        
+        # Test health endpoint
+        sleep 2
+        HEALTH_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health || echo "000")
+        if [ "$${HEALTH_CHECK}" = "200" ]; then
+            log "✅ Nginx health endpoint responding correctly (200)"
+        else
+            log "⚠️  WARNING: Nginx health endpoint returned: $${HEALTH_CHECK}"
+        fi
+    else
+        log "❌ Failed to start Nginx container"
+        docker logs nginx 2>&1 | tail -20
+    fi
+fi
+
 # Create systemd service for nginx auto-config
 cat > /etc/systemd/system/nginx-auto-config.service <<'SYSTEMD'
 [Unit]
