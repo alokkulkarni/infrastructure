@@ -58,8 +58,8 @@ source "amazon-ebs" "ubuntu" {
   # SSH timeout for SSM connection
   ssh_timeout = "20m"
   
-  # Pause to allow SSM agent to register
-  pause_before_ssm = "30s"
+  # Pause to allow SSM agent to register (increased for reliability)
+  pause_before_ssm = "2m"
   
   # Session Manager requires SSM agent to be running
   # Ubuntu 22.04 AMIs have it pre-installed, but we need to wait for registration
@@ -69,22 +69,48 @@ source "amazon-ebs" "ubuntu" {
   # The instance needs internet access to reach SSM endpoints
   associate_public_ip_address = true
   
-  # Ensure SSM agent starts and registers
+  # Ensure SSM agent starts and registers with improved logging
   user_data = <<-EOF
     #!/bin/bash
-    # Ensure SSM agent is running
-    systemctl enable amazon-ssm-agent
-    systemctl restart amazon-ssm-agent
+    set -x
+    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
     
-    # Wait for SSM agent to register
-    for i in {1..30}; do
-      if systemctl is-active --quiet amazon-ssm-agent; then
-        echo "SSM agent is running"
+    echo "Starting SSM agent setup at $(date)"
+    
+    # Ensure SSM agent is installed (should be pre-installed on Ubuntu 22.04)
+    if ! command -v amazon-ssm-agent &> /dev/null; then
+      echo "Installing SSM agent..."
+      snap install amazon-ssm-agent --classic
+    fi
+    
+    # Enable and start SSM agent
+    systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl enable amazon-ssm-agent
+    systemctl restart snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl restart amazon-ssm-agent
+    
+    # Wait for SSM agent to be active and registered
+    echo "Waiting for SSM agent to become active..."
+    for i in {1..60}; do
+      if systemctl is-active --quiet snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl is-active --quiet amazon-ssm-agent; then
+        echo "SSM agent is running (attempt $i)"
+        
+        # Additional wait for SSM registration with AWS
+        sleep 10
+        
+        # Check if we can reach SSM endpoints
+        if curl -s --max-time 5 https://ssm.${AWS_DEFAULT_REGION:-eu-west-2}.amazonaws.com > /dev/null 2>&1; then
+          echo "SSM endpoint reachable"
+        else
+          echo "Warning: SSM endpoint check failed, but continuing..."
+        fi
+        
+        echo "SSM agent setup complete at $(date)"
         break
       fi
-      echo "Waiting for SSM agent... ($i/30)"
+      echo "Waiting for SSM agent... ($i/60)"
       sleep 2
     done
+    
+    echo "User data script completed at $(date)"
   EOF
   
   # Increased timeout for AMI creation
