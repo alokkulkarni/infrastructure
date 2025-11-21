@@ -9,7 +9,10 @@ exec 2>&1
 
 # Log function
 log() {
-    echo "[$$(date +'%Y-%m-%d %H:%M:%S')] $$1"
+    local msg="$${1}"
+    local timestamp
+    timestamp="$(date +'%Y-%m-%d %H:%M:%S')"
+    echo "[$timestamp] $msg"
 }
 
 log "======================================"
@@ -23,23 +26,23 @@ RUNNER_NAME="${github_runner_name}"
 RUNNER_LABELS="${github_runner_labels}"
 
 log "Configuration:"
-log "  Repository: $$GITHUB_REPO_URL"
-log "  Runner Name: $$RUNNER_NAME"
-log "  Runner Labels: $$RUNNER_LABELS"
-log "  Token provided: $$(if [ -n "$$RUNNER_TOKEN" ] && [ "$$RUNNER_TOKEN" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+log "  Repository: $${GITHUB_REPO_URL}"
+log "  Runner Name: $${RUNNER_NAME}"
+log "  Runner Labels: $${RUNNER_LABELS}"
+log "  Token provided: $(if [ -n "$${RUNNER_TOKEN}" ] && [ "$${RUNNER_TOKEN}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
 # Verify pre-installed packages
 log "======================================"
 log "Verifying Pre-Installed Packages"
 log "======================================"
 
-log "Docker: $$(docker --version 2>&1 || echo 'NOT FOUND')"
-log "Docker Compose: $$(docker compose version 2>&1 || echo 'NOT FOUND')"
-log "Nginx: $$(nginx -v 2>&1 || echo 'NOT FOUND')"
-log "AWS CLI: $$(aws --version 2>&1 || echo 'NOT FOUND')"
-log "Node.js: $$(node --version 2>&1 || echo 'NOT FOUND')"
-log "Python: $$(python3 --version 2>&1 || echo 'NOT FOUND')"
-log "Git: $$(git --version 2>&1 || echo 'NOT FOUND')"
+log "Docker: $(docker --version 2>&1 || echo 'NOT FOUND')"
+log "Docker Compose: $(docker compose version 2>&1 || echo 'NOT FOUND')"
+log "Nginx: $(nginx -v 2>&1 || echo 'NOT FOUND')"
+log "AWS CLI: $(aws --version 2>&1 || echo 'NOT FOUND')"
+log "Node.js: $(node --version 2>&1 || echo 'NOT FOUND')"
+log "Python: $(python3 --version 2>&1 || echo 'NOT FOUND')"
+log "Git: $(git --version 2>&1 || echo 'NOT FOUND')"
 
 # Check if runner user exists
 if id "runner" &>/dev/null; then
@@ -52,9 +55,9 @@ fi
 
 # Verify runner directory
 RUNNER_DIR="/home/runner/actions-runner"
-if [ -d "$$RUNNER_DIR" ]; then
-    log "✅ Runner directory exists: $$RUNNER_DIR"
-    log "Contents: $$(ls -la $$RUNNER_DIR | wc -l) files"
+if [ -d "$${RUNNER_DIR}" ]; then
+    log "✅ Runner directory exists: $${RUNNER_DIR}"
+    log "Contents: $(ls -la $${RUNNER_DIR} | wc -l) files"
 else
     log "❌ Runner directory not found - AMI may not be properly built"
     exit 1
@@ -69,8 +72,8 @@ if timeout 10 curl -Is https://api.github.com --connect-timeout 10 > /dev/null 2
     log "✅ GitHub API accessible"
 else
     log "❌ Cannot reach GitHub API"
-    log "Routes: $$(ip route show)"
-    log "Public IP: $$(timeout 5 curl -s ifconfig.me || echo 'TIMEOUT')"
+    log "Routes: $(ip route show)"
+    log "Public IP: $(timeout 5 curl -s ifconfig.me || echo 'TIMEOUT')"
     log "WARNING: Proceeding with configuration anyway..."
 fi
 
@@ -79,7 +82,7 @@ log "======================================"
 log "Configuring GitHub Actions Runner"
 log "======================================"
 
-if [ -z "$$RUNNER_TOKEN" ] || [ "$$RUNNER_TOKEN" == "" ]; then
+if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
     log "❌ ERROR: No runner token provided"
     log "Runner cannot be registered without a token"
     log "Please provide github_runner_token in terraform.tfvars"
@@ -87,27 +90,27 @@ if [ -z "$$RUNNER_TOKEN" ] || [ "$$RUNNER_TOKEN" == "" ]; then
 fi
 
 # Check if runner is already configured
-if [ -f "$$RUNNER_DIR/.runner" ]; then
+if [ -f "$${RUNNER_DIR}/.runner" ]; then
     log "⚠️  Runner already configured - removing previous configuration..."
-    cd $$RUNNER_DIR
-    sudo -u runner ./config.sh remove --token "$$RUNNER_TOKEN" || true
+    cd $${RUNNER_DIR}
+    sudo -u runner ./config.sh remove --token "$${RUNNER_TOKEN}" || true
 fi
 
 # Configure runner as runner user
 log "Configuring runner..."
-cd $$RUNNER_DIR
+cd $${RUNNER_DIR}
 
-sudo -u runner bash <<RUNNEREOF
+sudo -u runner bash <<'RUNNEREOF'
 set -e
 ./config.sh \
-    --url $$GITHUB_REPO_URL \
-    --token $$RUNNER_TOKEN \
-    --name $$RUNNER_NAME \
-    --labels $$RUNNER_LABELS \
+    --url ${GITHUB_REPO_URL} \
+    --token ${RUNNER_TOKEN} \
+    --name ${RUNNER_NAME} \
+    --labels ${RUNNER_LABELS} \
     --unattended \
     --replace
 
-if [ \$$? -eq 0 ]; then
+if [ $? -eq 0 ]; then
     echo "✅ Runner configuration successful"
     
     # Verify registration file
@@ -121,7 +124,7 @@ else
 fi
 RUNNEREOF
 
-if [ $$? -ne 0 ]; then
+if [ $? -ne 0 ]; then
     log "❌ Failed to configure runner"
     exit 1
 fi
@@ -131,7 +134,7 @@ log "======================================"
 log "Starting Runner Service"
 log "======================================"
 
-cd $$RUNNER_DIR
+cd $${RUNNER_DIR}
 ./svc.sh install runner
 ./svc.sh start
 
@@ -165,54 +168,54 @@ NGINX_CONF_DIR="/etc/nginx/conf.d"
 TEMP_DIR="/opt/nginx/conf.d"
 
 generate_config() {
-    local container_name=$$1
-    local port=$$2
-    local host=$$3
-    local path=$$4
+    local container_name=$1
+    local port=$2
+    local host=$3
+    local path=$4
     
     # Default path to container name if not specified
-    path=$${path:-/$$container_name}
+    path=${path:-/$container_name}
     
-    local config_file="$$TEMP_DIR/$${container_name}.conf"
+    local config_file="$TEMP_DIR/${container_name}.conf"
     
-    cat > $$config_file <<NGINXEOF
-location $$path {
-    proxy_pass http://$${container_name}:$${port};
-    proxy_set_header Host \$$host;
-    proxy_set_header X-Real-IP \$$remote_addr;
-    proxy_set_header X-Forwarded-For \$$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$$scheme;
+    cat > $config_file <<NGINXEOF
+location $path {
+    proxy_pass http://$\{container_name\}:$\{port\}\;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 }
 NGINXEOF
     
     # Copy to nginx and reload
-    cp $$config_file $$NGINX_CONF_DIR/
+    cp $config_file $NGINX_CONF_DIR/
     nginx -t && nginx -s reload
     
-    echo "Generated config for $$container_name at $$path -> :$$port"
+    echo "Generated config for $container_name at $path -> :$port"
 }
 
 remove_config() {
-    local container_name=$$1
-    local config_file="$$NGINX_CONF_DIR/$${container_name}.conf"
+    local container_name=$1
+    local config_file="$NGINX_CONF_DIR/${container_name}.conf"
     
-    if [ -f "$$config_file" ]; then
-        rm $$config_file
+    if [ -f "$config_file" ]; then
+        rm $config_file
         nginx -t && nginx -s reload
-        echo "Removed config for $$container_name"
+        echo "Removed config for $container_name"
     fi
 }
 
 # Monitor Docker events
 docker events --filter 'type=container' --filter 'event=start' --filter 'event=stop' --format '{{.Status}}:{{.Actor.Attributes.name}}:{{.Actor.Attributes.nginx.port}}:{{.Actor.Attributes.nginx.host}}:{{.Actor.Attributes.nginx.path}}' | while IFS=: read -r status container_name port host path; do
-    case $$status in
+    case $status in
         start)
-            if [ -n "$$port" ]; then
-                generate_config $$container_name $$port $$host $$path
+            if [ -n "$port" ]; then
+                generate_config $container_name $port $host $path
             fi
             ;;
         stop)
-            remove_config $$container_name
+            remove_config $container_name
             ;;
     esac
 done
@@ -253,12 +256,12 @@ fi
 log "======================================"
 log "Configuration Complete"
 log "======================================"
-log "Runner Status: $$RUNNER_STATUS"
-log "Runner Name: $$RUNNER_NAME"
-log "Runner Labels: $$RUNNER_LABELS"
+log "Runner Status: $${RUNNER_STATUS}"
+log "Runner Name: $${RUNNER_NAME}"
+log "Runner Labels: $${RUNNER_LABELS}"
 log "Log File: /var/log/user-data.log"
-log "Completed at: $$(date)"
+log "Completed at: $(date)"
 log "======================================"
 
 # Write completion marker
-echo "USER_DATA_COMPLETED_AT=$$(date +%s)" > /var/log/user-data-complete.txt
+echo "USER_DATA_COMPLETED_AT=$(date +%s)" > /var/log/user-data-complete.txt
