@@ -285,11 +285,12 @@ echo "Installed version: $INSTALLED_VERSION"
 
 ### Step 5.5: Install Runner Dependencies
 ```bash
-# Install dependencies (if prompted)
-sudo ./bin/installdependencies.sh
-
-# Exit back to ubuntu user
+# Exit back to ubuntu user first
 exit
+
+# Now install dependencies as ubuntu user (has sudo privileges)
+cd /home/runner/actions-runner
+sudo ./bin/installdependencies.sh
 ```
 
 ---
@@ -771,7 +772,10 @@ sudo curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz -L \
 sudo tar xzf actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 sudo rm actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 sudo chown -R runner:runner /home/runner
-sudo -u runner ./bin/installdependencies.sh
+
+# Install runner dependencies (run before changing ownership)
+cd /home/runner/actions-runner
+sudo ./bin/installdependencies.sh
 
 # Verify
 echo "=========================================="
