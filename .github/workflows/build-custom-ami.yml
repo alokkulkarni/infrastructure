@@ -77,6 +77,28 @@ jobs:
             
             echo "✅ IAM stack created successfully" >> $GITHUB_STEP_SUMMARY
           fi
+          
+          # Verify the instance profile exists
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verifying IAM resources..." >> $GITHUB_STEP_SUMMARY
+          
+          if aws iam get-instance-profile --instance-profile-name PackerSSMInstanceProfile 2>/dev/null; then
+            echo "✅ Instance profile 'PackerSSMInstanceProfile' verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Instance profile not found!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          if aws iam get-role --role-name PackerSSMRole 2>/dev/null; then
+            echo "✅ IAM role 'PackerSSMRole' verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ IAM role not found!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Wait a bit for IAM eventual consistency
+          echo "Waiting 10 seconds for IAM propagation..."
+          sleep 10
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
@@ -154,11 +176,20 @@ jobs:
             -var "region=${{ env.AWS_REGION }}" \
             -var "instance_type=${{ github.event.inputs.instance_type }}" \
             github-runner-ami.pkr.hcl
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Packer Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Communicator: SSH over SSM Session Manager" >> $GITHUB_STEP_SUMMARY
+          echo "- IAM Instance Profile: PackerSSMInstanceProfile" >> $GITHUB_STEP_SUMMARY
+          echo "- SSH Interface: session_manager" >> $GITHUB_STEP_SUMMARY
+          echo "- Session Manager Port: 0 (default)" >> $GITHUB_STEP_SUMMARY
 
       - name: Build AMI with Packer
         id: build
         if: steps.check-ami.outputs.recent_ami_found != 'true'
         working-directory: AWS/packer
+        env:
+          PACKER_LOG: 1
         run: |
           echo "## 🚀 Building Custom AMI" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -167,12 +198,12 @@ jobs:
           echo "**Started:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          echo "Starting Packer build..."
+          echo "Starting Packer build with SSM logging..."
           packer build \
             -var "region=${{ env.AWS_REGION }}" \
             -var "instance_type=${{ github.event.inputs.instance_type }}" \
             -color=false \
-            github-runner-ami.pkr.hcl | tee packer-build.log
+            github-runner-ami.pkr.hcl 2>&1 | tee packer-build.log
           
           # Extract AMI ID from manifest
           if [ -f "manifest.json" ]; then

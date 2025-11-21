@@ -1,7 +1,7 @@
 packer {
   required_plugins {
     amazon = {
-      version = ">= 1.2.8"
+      version = ">= 1.3.0"
       source  = "github.com/hashicorp/amazon"
     }
   }
@@ -51,9 +51,41 @@ source "amazon-ebs" "ubuntu" {
   
   # Use AWS Systems Manager Session Manager instead of SSH
   # This avoids network connectivity issues with GitHub Actions runners
-  communicator                        = "ssh"
-  ssh_interface                       = "session_manager"
-  iam_instance_profile                = "PackerSSMInstanceProfile"
+  communicator         = "ssh"
+  ssh_interface        = "session_manager"
+  iam_instance_profile = "PackerSSMInstanceProfile"
+  
+  # SSH timeout for SSM connection
+  ssh_timeout = "20m"
+  
+  # Pause to allow SSM agent to register
+  pause_before_ssm = "30s"
+  
+  # Session Manager requires SSM agent to be running
+  # Ubuntu 22.04 AMIs have it pre-installed, but we need to wait for registration
+  session_manager_port = 0
+  
+  # Use default VPC for SSM connectivity
+  # The instance needs internet access to reach SSM endpoints
+  associate_public_ip_address = true
+  
+  # Ensure SSM agent starts and registers
+  user_data = <<-EOF
+    #!/bin/bash
+    # Ensure SSM agent is running
+    systemctl enable amazon-ssm-agent
+    systemctl restart amazon-ssm-agent
+    
+    # Wait for SSM agent to register
+    for i in {1..30}; do
+      if systemctl is-active --quiet amazon-ssm-agent; then
+        echo "SSM agent is running"
+        break
+      fi
+      echo "Waiting for SSM agent... ($i/30)"
+      sleep 2
+    done
+  EOF
   
   # Increased timeout for AMI creation
   aws_polling {
