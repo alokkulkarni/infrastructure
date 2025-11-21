@@ -141,23 +141,23 @@ GITHUB_REACHABLE=false
 MAX_RETRIES=30
 RETRY_DELAY=10
 
-for i in $$(seq 1 $$MAX_RETRIES); do
-    log "Attempt $$i/$$MAX_RETRIES: Testing GitHub API connectivity..."
+for i in $(seq 1 $${MAX_RETRIES}); do
+    log "Attempt $i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
     if timeout 10 curl -s -o /dev/null -w "%%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
         log "✅ GitHub API is reachable"
         GITHUB_REACHABLE=true
         break
     else
         log "⚠️ GitHub API not reachable yet, waiting $${RETRY_DELAY}s..."
-        if [ $$i -lt $$MAX_RETRIES ]; then
-            sleep $$RETRY_DELAY
+        if [ $i -lt $${MAX_RETRIES} ]; then
+            sleep $${RETRY_DELAY}
         fi
     fi
 done
 
-if [ "$$GITHUB_REACHABLE" = false ]; then
-    log "❌ ERROR: GitHub API unreachable after $$MAX_RETRIES attempts (5 minutes)"
-    log "Routes: $$(ip route)"
+if [ "$${GITHUB_REACHABLE}" = false ]; then
+    log "❌ ERROR: GitHub API unreachable after $${MAX_RETRIES} attempts (5 minutes)"
+    log "Routes: $(ip route)"
     log "DNS resolution test:"
     nslookup api.github.com || true
     log "This likely indicates NAT Gateway or routing issues"
@@ -171,7 +171,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
     log "Authenticating GitHub CLI with PAT..."
     echo "$GITHUB_PAT" | gh auth login --with-token
     
-    if [ $$? -eq 0 ]; then
+    if [ $? -eq 0 ]; then
         log "✅ GitHub CLI authenticated successfully"
         gh auth status
         
@@ -188,7 +188,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
             log "Token generation output: $RUNNER_TOKEN"
         else
             log "✅ Runner token generated successfully"
-            log "Token length: $${#RUNNER_TOKEN} characters"
+            log "Token length: ${#RUNNER_TOKEN} characters"
             
             # Clear PAT from environment for security
             unset GITHUB_PAT
@@ -205,7 +205,7 @@ if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
                 --unattended \
                 --replace 2>&1 | tee -a /var/log/runner-config.log
             
-            CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
+            CONFIG_EXIT_CODE=${PIPESTATUS[0]}
             
             if [ $CONFIG_EXIT_CODE -eq 0 ]; then
                 log "✅ Runner configured successfully"
@@ -510,7 +510,7 @@ generate_config() {
         nginx_path="/$container_name"
     fi
     
-    local config_file="$GENERATED_DIR/$${container_name}.conf"
+    local config_file="$GENERATED_DIR/${container_name}.conf"
     
     log "Generating Nginx config for container: $container_name (port: $port, path: $nginx_path)"
     
@@ -520,8 +520,8 @@ generate_config() {
 # Generated at: $(date)
 # Container ID: $container_id
 
-upstream $${container_name}_backend {
-    server $${container_name}:$${port};
+upstream ${container_name}_backend {
+    server ${container_name}:${port};
 }
 
 server {
@@ -536,7 +536,7 @@ NGINXCONF
     cat >> $config_file <<NGINXCONF
     
     location $nginx_path {
-        proxy_pass http://$${container_name}_backend;
+        proxy_pass http://${container_name}_backend;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -564,7 +564,7 @@ NGINXCONF
 # Function to remove Nginx config for a container
 remove_config() {
     local container_name=$1
-    local config_file="$GENERATED_DIR/$${container_name}.conf"
+    local config_file="$GENERATED_DIR/${container_name}.conf"
     
     if [ -f $config_file ]; then
         log "Removing Nginx config for container: $container_name"
