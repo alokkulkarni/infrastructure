@@ -174,9 +174,9 @@ generate_config() {
     local path=$4
     
     # Default path to container name if not specified
-    path=${path:-/$container_name}
+    path=$${path:-/$${container_name}}
     
-    local config_file="$TEMP_DIR/${container_name}.conf"
+    local config_file="$TEMP_DIR/$${container_name}.conf"
     
     cat > $config_file <<NGINXEOF
 location $path {
@@ -197,7 +197,7 @@ NGINXEOF
 
 remove_config() {
     local container_name=$1
-    local config_file="$NGINX_CONF_DIR/${container_name}.conf"
+    local config_file="$NGINX_CONF_DIR/$${container_name}.conf"
     
     if [ -f "$config_file" ]; then
         rm $config_file
