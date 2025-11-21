@@ -289,8 +289,8 @@ echo "Installed version: $INSTALLED_VERSION"
 exit
 
 # Now install dependencies as ubuntu user (has sudo privileges)
-cd /home/runner/actions-runner
-sudo ./bin/installdependencies.sh
+# Use full path since we're not in the runner user's session
+sudo /home/runner/actions-runner/bin/installdependencies.sh
 ```
 
 ---
