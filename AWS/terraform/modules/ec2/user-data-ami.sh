@@ -146,7 +146,7 @@ RETRY_DELAY=10
 
 for i in $$(seq 1 $${MAX_RETRIES}); do
     log "Attempt $$i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
-    if timeout 10 curl -s -o /dev/null -w "%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
+    if timeout 10 curl -s -o /dev/null -w "%%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
         log "✅ GitHub API is reachable"
         GITHUB_REACHABLE=true
         break
