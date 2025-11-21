@@ -1,13 +1,9 @@
 # GitHub Actions Runner AMI Build Guide
 
 **Last Updated:** 2025-11-21  
-**Runner Version:** 2.329.0 (Downgraded from 2.330.0 due to IsHostedServer detection bug)  
+**Runner Version:** 2.330.0 (Latest stable)  
 **Base OS:** Ubuntu 22.04 LTS  
 **Region:** eu-west-2 (London)
-
-**⚠️ IMPORTANT:** Do NOT use runner 2.330.0 - it has a bug in PR #4086 where the IsHostedServer detection logic  
-incorrectly identifies self-hosted runners as hosted infrastructure, causing registration failures with  
-404 errors on deprecated API endpoints. Use 2.329.0 until the bug is fixed.
 
 ---
 
@@ -219,7 +215,7 @@ ls -la /home/runner/
 
 ## Phase 5: Install GitHub Actions Runner
 
-### Step 5.1: Download Runner 2.329.0 (NOT 2.330.0!)
+### Step 5.1: Download Latest Runner
 ```bash
 # Switch to runner user
 sudo su - runner
@@ -227,8 +223,8 @@ sudo su - runner
 # Navigate to actions-runner directory
 cd /home/runner/actions-runner
 
-# Download runner v2.329.0 (DO NOT use 2.330.0 - has IsHostedServer bug)
-RUNNER_VERSION="2.329.0"
+# Download latest runner version
+RUNNER_VERSION="2.330.0"
 curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz -L \
     https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
@@ -237,8 +233,10 @@ ls -lh actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 # Should show ~150-200 MB file
 ```
 
-**⚠️ CRITICAL:** Do NOT use the "latest" version command as it will download 2.330.0 which has a bug.  
-Stick with 2.329.0 explicitly until GitHub fixes the IsHostedServer detection issue in 2.331.0+.
+**Note:** You can also fetch the latest version dynamically:
+```bash
+RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+')  
+```
 
 ### Step 5.2: Verify Download (Optional but Recommended)
 ```bash
@@ -246,9 +244,8 @@ Stick with 2.329.0 explicitly until GitHub fixes the IsHostedServer detection is
 # Compare with downloaded file
 sha256sum actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
-# Official SHA256 for 2.329.0:
-# 194f1e1e4bd02f80b7e9633fc546084d8d4e19f3928a324d512ea53430102e1d
-# (Check https://github.com/actions/runner/releases/tag/v2.329.0)
+# Official SHA256 for 2.330.0:
+# (Check https://github.com/actions/runner/releases/tag/v2.330.0 for correct hash)
 ```
 
 ### Step 5.3: Extract Runner

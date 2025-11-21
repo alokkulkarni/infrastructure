@@ -133,56 +133,43 @@ log "Configuring runner..."
 cd $${RUNNER_DIR}
 
 # Run config.sh with verbose output for debugging
-sudo -u runner bash <<RUNNEREOF
-set -e
-
-echo "Starting runner configuration..."
-echo "Runner directory: $(pwd)"
-echo "Config script: $(ls -lh config.sh)"
-echo ""
-
-./config.sh \
-    --url $${GITHUB_REPO_URL} \
-    --token $${RUNNER_TOKEN} \
-    --name $${RUNNER_NAME} \
-    --labels $${RUNNER_LABELS} \
+# NOTE: Execute directly as runner user without heredoc to avoid environment detection issues
+sudo -u runner ./config.sh \
+    --url "$${GITHUB_REPO_URL}" \
+    --token "$${RUNNER_TOKEN}" \
+    --name "$${RUNNER_NAME}" \
+    --labels "$${RUNNER_LABELS}" \
     --unattended \
-    --replace
+    --replace 2>&1 | tee -a /var/log/runner-config.log
 
-CONFIG_EXIT_CODE=\$?
+CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
 
-if [ \$CONFIG_EXIT_CODE -eq 0 ]; then
-    echo "✅ Runner configuration successful"
+CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
+
+if [ $${CONFIG_EXIT_CODE} -eq 0 ]; then
+    log "✅ Runner configuration successful"
     
     # Verify registration file with jq
-    if [ -f ".runner" ]; then
-        echo "✅ Runner registration file created:"
+    if [ -f "$${RUNNER_DIR}/.runner" ]; then
+        log "✅ Runner registration file created:"
         if command -v jq &> /dev/null; then
-            cat .runner | jq '.'
+            cat "$${RUNNER_DIR}/.runner" | jq '.'
         else
-            cat .runner
+            cat "$${RUNNER_DIR}/.runner"
         fi
     else
-        echo "⚠️  WARNING: .runner file not found after configuration"
+        log "⚠️  WARNING: .runner file not found after configuration"
     fi
     
     # Verify credentials file
-    if [ -f ".credentials" ]; then
-        echo "✅ Credentials file created"
+    if [ -f "$${RUNNER_DIR}/.credentials" ]; then
+        log "✅ Credentials file created"
     else
-        echo "⚠️  WARNING: .credentials file not found"
+        log "⚠️  WARNING: .credentials file not found"
     fi
 else
-    echo "❌ Runner configuration failed with exit code \$CONFIG_EXIT_CODE"
-    echo "Last 50 lines of config output:"
-    tail -50 /var/log/user-data.log 2>/dev/null || echo "Could not read log"
-    exit 1
-fi
-RUNNEREOF
-
-CONFIG_RESULT=$${?}
-if [ $${CONFIG_RESULT} -ne 0 ]; then
-    log "❌ Failed to configure runner (exit code: $${CONFIG_RESULT})"
+    log "❌ Runner configuration failed with exit code $${CONFIG_EXIT_CODE}"
+    log "Configuration output saved to /var/log/runner-config.log"
     log "This usually indicates:"
     log "  1. Invalid or expired registration token"
     log "  2. Network connectivity issues"
