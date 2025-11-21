@@ -328,16 +328,16 @@ echo "Runner User:"
 id runner
 echo ""
 
-# Check runner directory
+# Check runner directory (use sudo to access)
 echo "Runner Directory:"
-ls -la /home/runner/actions-runner/ | head -10
+sudo ls -la /home/runner/actions-runner/ | head -10
 echo "... (showing first 10 entries)"
 echo ""
 
-# Check runner version
+# Check runner version (use sudo to access directory)
 echo "Runner Version:"
-cd /home/runner/actions-runner
-sudo -u runner ./config.sh --version
+RUNNER_VERSION=$(sudo -u runner /home/runner/actions-runner/config.sh --version 2>&1)
+echo "$RUNNER_VERSION"
 echo ""
 
 # Check Docker group membership
