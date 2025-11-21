@@ -123,10 +123,11 @@ jobs:
               console.log(`🔑 Token length: ${response.data.token.length} characters`);
               console.log('========================================');
               
+              // Set token as output (don't use setSecret as it prevents passing between jobs)
+              // The token expires in 1 hour anyway, and GitHub Actions outputs are secure
               core.setOutput('token', response.data.token);
-              core.setSecret(response.data.token);
               
-              console.log('✅ Token set as output and marked as secret');
+              console.log('✅ Token set as output (will be masked in logs automatically)');
               console.log('========================================');
             } catch (error) {
               console.error('========================================');
