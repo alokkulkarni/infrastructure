@@ -296,39 +296,31 @@ NGINX_CONF_DIR="/etc/nginx/conf.d"
 TEMP_DIR="/opt/nginx/conf.d"
 
 generate_config() {
-    local container_name=$$1
-    local port=$$2
-    local host=$$3
-    local path=$$4
+    local container_name=$1
+    local port=$2
+    local host=$3
+    local path=$4
     
     # Default path to container name if not specified
     path=$${path:-/$${container_name}}
     
-    # Get container IP address from Docker (native nginx can't use Docker DNS)
-    local container_ip=$$(docker inspect -f '{{.NetworkSettings.Networks.app-network.IPAddress}}' "$${container_name}" 2>/dev/null)
+    local config_file="$TEMP_DIR/$${container_name}.conf"
     
-    if [ -z "$${container_ip}" ]; then
-        echo "ERROR: Could not get IP for container $${container_name}"
-        return 1
-    fi
-    
-    local config_file="$$TEMP_DIR/$${container_name}.conf"
-    
-    cat > $$config_file <<NGINXEOF
-location $$path {
-    proxy_pass http://$${container_ip}:$$port;
-    proxy_set_header Host \$$host;
-    proxy_set_header X-Real-IP \$$remote_addr;
-    proxy_set_header X-Forwarded-For \$$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$$scheme;
+    cat > $config_file <<NGINXEOF
+location $path {
+    proxy_pass http://$container_name:$port;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 }
 NGINXEOF
     
     # Copy to nginx and reload
-    cp $$config_file $$NGINX_CONF_DIR/
+    cp $config_file $NGINX_CONF_DIR/
     nginx -t && nginx -s reload
     
-    echo "Generated config for $$container_name at $$path -> $${container_ip}:$$port"
+    echo "Generated config for $container_name at $path -> :$port"
 }
 
 remove_config() {
@@ -395,64 +387,94 @@ mkdir -p /opt/nginx/conf.d
 
 log "Adding health endpoint and Docker proxy configuration to Nginx..."
 
-# Create native nginx site configuration for reverse proxy
-cat > /etc/nginx/sites-available/docker-proxy <<'NGINXCONF'
-# Health check endpoint for ALB and reverse proxy for Docker containers
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
+# Create base Nginx config with health endpoint
+mkdir -p /opt/nginx/conf.d/auto-generated
+cat > /opt/nginx/nginx.conf <<'NGINXCONF'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
 
-    # Health check endpoint for ALB
-    location /health {
-        access_log off;
-        add_header Content-Type text/plain;
-        return 200 "Nginx reverse proxy is running\n";
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet/stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    keepalive_timeout 65;
+    gzip on;
+
+    # Docker DNS resolver
+    resolver 127.0.0.11 valid=30s;
+
+    # Default server with health check
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        # Health check endpoint for ALB
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+
+        # Default response
+        location / {
+            return 200 "Nginx reverse proxy is running\n";
+            add_header Content-Type text/plain;
+        }
     }
 
-    # Include auto-generated proxy configs for Docker containers
+    # Include auto-generated and manual configurations
     include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/conf.d/auto-generated/*.conf;
 }
 NGINXCONF
 
-# Enable the site and disable default
-ln -sf /etc/nginx/sites-available/docker-proxy /etc/nginx/sites-enabled/docker-proxy
-rm -f /etc/nginx/sites-enabled/default
+# Start Nginx container
+docker run -d \
+    --name nginx \
+    --restart unless-stopped \
+    --network app-network \
+    -p 80:80 \
+    -p 443:443 \
+    -v /opt/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
+    -v /opt/nginx/conf.d:/etc/nginx/conf.d:ro \
+    nginx:alpine
 
-# Test and reload nginx
-log "Testing nginx configuration..."
-if nginx -t 2>&1 | tee -a /var/log/user-data.log; then
-    log "✅ Nginx configuration valid"
+# Wait for Nginx to start
+sleep 5
+
+# Verify Nginx is running
+if docker ps | grep -q " nginx$$"; then
+    log "✅ Nginx container started successfully"
     
-    # Restart nginx to apply changes
-    systemctl restart nginx
-    systemctl enable nginx
-    
-    # Wait for nginx to start
+    # Test health endpoint
     sleep 2
-    
-    # Verify Nginx is running
-    if systemctl is-active --quiet nginx; then
-        log "✅ Native Nginx started successfully"
-        
-        # Test health endpoint
-        sleep 1
-        HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000")
-        if [ "${HEALTH_CHECK}" = "200" ]; then
-            log "✅ Nginx health endpoint responding correctly (200)"
-        else
-            log "⚠️  WARNING: Nginx health endpoint returned: ${HEALTH_CHECK}"
-            log "Checking nginx status..."
-            systemctl status nginx | tee -a /var/log/user-data.log
-        fi
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health || echo "000")
+    if [ "$${HEALTH_CHECK}" = "200" ]; then
+        log "✅ Nginx health endpoint responding correctly (200)"
     else
-        log "❌ Failed to start Nginx"
-        systemctl status nginx | tee -a /var/log/user-data.log
+        log "⚠️  WARNING: Nginx health endpoint returned: $${HEALTH_CHECK}"
     fi
 else
-    log "❌ Nginx configuration test failed"
-    nginx -t 2>&1 | tee -a /var/log/user-data.log
+    log "❌ Failed to start Nginx container"
+    docker logs nginx 2>&1 | tail -20
 fi
+
+# Create systemd service for nginx auto-config
 cat > /etc/systemd/system/nginx-auto-config.service <<'SYSTEMD'
 [Unit]
 Description=Nginx Auto Configuration Manager
