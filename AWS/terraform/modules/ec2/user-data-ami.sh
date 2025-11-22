@@ -21,7 +21,7 @@ log "======================================"
 
 # Runner configuration variables from Terraform
 GITHUB_REPO_URL="${github_repo_url}"
-RUNNER_TOKEN="${github_runner_token}"
+GITHUB_PAT="${github_pat}"
 RUNNER_NAME="${github_runner_name}"
 RUNNER_LABELS="${github_runner_labels}"
 
@@ -29,7 +29,7 @@ log "Configuration:"
 log "  Repository: $${GITHUB_REPO_URL}"
 log "  Runner Name: $${RUNNER_NAME}"
 log "  Runner Labels: $${RUNNER_LABELS}"
-log "  Token provided: $$(if [ -n "$${RUNNER_TOKEN}" ] && [ "$${RUNNER_TOKEN}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+log "  PAT provided: $$(if [ -n "$${GITHUB_PAT}" ] && [ "$${GITHUB_PAT}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
 # Verify pre-installed packages
 log "======================================"
@@ -82,12 +82,79 @@ log "======================================"
 log "Configuring GitHub Actions Runner"
 log "======================================"
 
-if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
-    log "❌ ERROR: No runner token provided"
-    log "Runner cannot be registered without a token"
-    log "Please provide github_runner_token in terraform.tfvars"
+if [ -z "$${GITHUB_PAT}" ] || [ "$${GITHUB_PAT}" == "" ]; then
+    log "❌ ERROR: No GitHub PAT provided"
+    log "Runner cannot be registered without a PAT"
+    log "Please provide github_pat in terraform.tfvars"
     exit 1
 fi
+
+# Wait for NAT Gateway to be fully operational before attempting GitHub API calls
+log "======================================"
+log "Testing GitHub Connectivity"
+log "======================================"
+
+GITHUB_REACHABLE=false
+MAX_RETRIES=30
+RETRY_DELAY=10
+
+for i in $$(seq 1 $${MAX_RETRIES}); do
+    log "Attempt $$i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
+    if timeout 10 curl -s -o /dev/null -w "%%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
+        log "✅ GitHub API is reachable"
+        GITHUB_REACHABLE=true
+        break
+    else
+        log "⚠️ GitHub API not reachable yet, waiting $${RETRY_DELAY}s..."
+        if [ $$i -lt $${MAX_RETRIES} ]; then
+            sleep $${RETRY_DELAY}
+        fi
+    fi
+done
+
+if [ "$${GITHUB_REACHABLE}" = false ]; then
+    log "❌ ERROR: GitHub API unreachable after $${MAX_RETRIES} attempts (5 minutes)"
+    log "Routes: $$(ip route)"
+    log "DNS resolution test:"
+    nslookup api.github.com || true
+    log "This likely indicates NAT Gateway or routing issues"
+    exit 1
+fi
+
+log "✅ Internet connectivity confirmed, proceeding with runner configuration"
+
+# Authenticate gh CLI with PAT
+log "Authenticating GitHub CLI with PAT..."
+echo "$${GITHUB_PAT}" | gh auth login --with-token
+
+if [ $$? -eq 0 ]; then
+    log "✅ GitHub CLI authenticated successfully"
+    gh auth status
+else
+    log "❌ GitHub CLI authentication failed"
+    exit 1
+fi
+
+# Extract owner and repo from URL
+REPO_FULL=$$(echo "$${GITHUB_REPO_URL}" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+log "Extracted repository: $${REPO_FULL}"
+
+# Generate runner registration token using gh CLI
+log "Generating runner registration token via gh CLI..."
+RUNNER_TOKEN=$$(gh api --method POST "repos/$${REPO_FULL}/actions/runners/registration-token" --jq '.token' 2>&1)
+
+if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
+    log "❌ ERROR: Failed to generate runner token"
+    log "Token generation output: $${RUNNER_TOKEN}"
+    exit 1
+else
+    log "✅ Runner token generated successfully"
+    log "Token length: $${#RUNNER_TOKEN} characters"
+fi
+
+# Clear PAT from environment for security
+unset GITHUB_PAT
+log "✅ PAT cleared from environment"
 
 # Check if runner is already configured
 if [ -f "$${RUNNER_DIR}/.runner" ]; then
@@ -100,32 +167,42 @@ fi
 log "Configuring runner..."
 cd $${RUNNER_DIR}
 
-sudo -u runner bash <<RUNNEREOF
-set -e
-./config.sh \
-    --url $${GITHUB_REPO_URL} \
-    --token $${RUNNER_TOKEN} \
-    --name $${RUNNER_NAME} \
-    --labels $${RUNNER_LABELS} \
+# Run config.sh with verbose output for debugging
+sudo -u runner ./config.sh \
+    --url "$${GITHUB_REPO_URL}" \
+    --token "$${RUNNER_TOKEN}" \
+    --name "$${RUNNER_NAME}" \
+    --labels "$${RUNNER_LABELS}" \
     --unattended \
-    --replace
+    --replace 2>&1 | tee -a /var/log/runner-config.log
 
-if [ \$${?} -eq 0 ]; then
-    echo "✅ Runner configuration successful"
+CONFIG_EXIT_CODE=$${PIPESTATUS[0]}
+
+if [ $${CONFIG_EXIT_CODE} -eq 0 ]; then
+    log "✅ Runner configuration successful"
     
     # Verify registration file
-    if [ -f ".runner" ]; then
-        echo "✅ Runner registration file created:"
-        cat .runner | jq '.' 2>/dev/null || cat .runner
+    if [ -f "$${RUNNER_DIR}/.runner" ]; then
+        log "✅ Runner registration file created:"
+        cat "$${RUNNER_DIR}/.runner" 2>/dev/null || echo "Could not read .runner file"
+    else
+        log "⚠️  WARNING: .runner file not found after configuration"
+    fi
+    
+    # Verify credentials file
+    if [ -f "$${RUNNER_DIR}/.credentials" ]; then
+        log "✅ Credentials file created"
+    else
+        log "⚠️  WARNING: .credentials file not found"
     fi
 else
-    echo "❌ Runner configuration failed"
-    exit 1
-fi
-RUNNEREOF
-
-if [ $${?} -ne 0 ]; then
-    log "❌ Failed to configure runner"
+    log "❌ Runner configuration failed with exit code $${CONFIG_EXIT_CODE}"
+    log "Configuration output saved to /var/log/runner-config.log"
+    log "This usually indicates:"
+    log "  1. Invalid or expired registration token"
+    log "  2. Network connectivity issues"
+    log "  3. Incorrect repository URL"
+    log "  4. Runner version incompatibility"
     exit 1
 fi
 
