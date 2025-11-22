@@ -351,6 +351,19 @@ AUTOCONFIG
 
 chmod +x /opt/nginx/auto-config.sh
 
+# Ensure Docker network exists
+log "======================================"
+log "Setting up Docker Network"
+log "======================================"
+
+if docker network ls | grep -q "app-network"; then
+    log "✅ app-network already exists"
+else
+    log "Creating app-network..."
+    docker network create --driver bridge app-network
+    log "✅ app-network created successfully"
+fi
+
 # Ensure Nginx container is running
 log "======================================"
 log "Starting Nginx Container"
