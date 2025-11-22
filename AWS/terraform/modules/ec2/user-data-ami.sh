@@ -335,7 +335,7 @@ remove_config() {
 }
 
 # Monitor Docker events
-docker events --filter 'type=container' --filter 'event=start' --filter 'event=stop' --format '{{.Status}}:{{.Actor.Attributes.name}}:{{.Actor.Attributes.nginx.port}}:{{.Actor.Attributes.nginx.host}}:{{.Actor.Attributes.nginx.path}}' | while IFS=: read -r status container_name port host path; do
+docker events --filter 'type=container' --filter 'event=start' --filter 'event=stop' --format '%{{.Status}}:%{{.Actor.Attributes.name}}:%{{.Actor.Attributes.nginx.port}}:%{{.Actor.Attributes.nginx.host}}:%{{.Actor.Attributes.nginx.path}}' | while IFS=: read -r status container_name port host path; do
     case $status in
         start)
             if [ -n "$port" ]; then
@@ -369,43 +369,15 @@ log "======================================"
 log "Starting Nginx Container"
 log "======================================"
 
-# Check if port 80 is in use and clean up if needed
-log "Checking if port 80 is already in use..."
-PORT_80_PID=$$(lsof -ti:80 2>/dev/null || echo "")
-if [ -n "$${PORT_80_PID}" ]; then
-    log "⚠️  Port 80 is in use by PID: $${PORT_80_PID}"
-    
-    # Check if it's a container
-    PORT_80_CONTAINER=$$(docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' | grep '0.0.0.0:80' | awk '{print $$2}' | head -1)
-    if [ -n "$${PORT_80_CONTAINER}" ]; then
-        log "Port 80 is used by container: $${PORT_80_CONTAINER}, stopping it..."
-        docker stop "$${PORT_80_CONTAINER}" 2>/dev/null || true
-        docker rm -f "$${PORT_80_CONTAINER}" 2>/dev/null || true
-        sleep 2
-        log "✅ Cleaned up container using port 80"
-    fi
-fi
-
-# Check if Nginx container exists
-if docker ps -a | grep -q " nginx$$"; then
-    log "Nginx container exists, checking status..."
-    
-    if docker ps | grep -q " nginx$$"; then
-        log "✅ Nginx container already running"
-    else
-        log "Nginx container stopped, removing and recreating..."
-        docker rm -f nginx 2>/dev/null || true
-        sleep 2
-        # Will be created below
-    fi
-fi
-
-# Ensure old nginx container is removed before creating new one
-if docker ps -a | grep -q " nginx$$"; then
-    log "Removing existing Nginx container to ensure clean state..."
+# Remove any existing nginx container to ensure clean state
+log "Checking for existing Nginx container..."
+NGINX_EXISTS=$$(docker ps -aq -f name=^nginx$$ 2>/dev/null || echo "")
+if [ -n "$${NGINX_EXISTS}" ]; then
+    log "Found existing Nginx container, removing it..."
     docker stop nginx 2>/dev/null || true
     docker rm -f nginx 2>/dev/null || true
     sleep 2
+    log "✅ Cleaned up existing Nginx container"
 fi
 
 log "Creating new Nginx container..."
