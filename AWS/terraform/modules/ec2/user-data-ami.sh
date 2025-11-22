@@ -369,29 +369,50 @@ log "======================================"
 log "Starting Nginx Container"
 log "======================================"
 
+# Check if port 80 is in use and clean up if needed
+log "Checking if port 80 is already in use..."
+PORT_80_PID=$$(lsof -ti:80 2>/dev/null || echo "")
+if [ -n "$${PORT_80_PID}" ]; then
+    log "⚠️  Port 80 is in use by PID: $${PORT_80_PID}"
+    
+    # Check if it's a container
+    PORT_80_CONTAINER=$$(docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' | grep '0.0.0.0:80' | awk '{print $$2}' | head -1)
+    if [ -n "$${PORT_80_CONTAINER}" ]; then
+        log "Port 80 is used by container: $${PORT_80_CONTAINER}, stopping it..."
+        docker stop "$${PORT_80_CONTAINER}" 2>/dev/null || true
+        docker rm -f "$${PORT_80_CONTAINER}" 2>/dev/null || true
+        sleep 2
+        log "✅ Cleaned up container using port 80"
+    fi
+fi
+
 # Check if Nginx container exists
-if docker ps -a | grep -q " nginx$"; then
+if docker ps -a | grep -q " nginx$$"; then
     log "Nginx container exists, checking status..."
     
-    if docker ps | grep -q " nginx$"; then
+    if docker ps | grep -q " nginx$$"; then
         log "✅ Nginx container already running"
     else
-        log "Nginx container stopped, starting..."
-        docker start nginx
-        sleep 3
-        
-        if docker ps | grep -q " nginx$"; then
-            log "✅ Nginx container started successfully"
-        else
-            log "❌ Failed to start existing Nginx container"
-        fi
+        log "Nginx container stopped, removing and recreating..."
+        docker rm -f nginx 2>/dev/null || true
+        sleep 2
+        # Will be created below
     fi
-else
-    log "Nginx container does not exist, creating and starting..."
-    
-    # Create base Nginx config with health endpoint
-    mkdir -p /opt/nginx/conf.d/auto-generated
-    cat > /opt/nginx/nginx.conf <<'NGINXCONF'
+fi
+
+# Ensure old nginx container is removed before creating new one
+if docker ps -a | grep -q " nginx$$"; then
+    log "Removing existing Nginx container to ensure clean state..."
+    docker stop nginx 2>/dev/null || true
+    docker rm -f nginx 2>/dev/null || true
+    sleep 2
+fi
+
+log "Creating new Nginx container..."
+
+# Create base Nginx config with health endpoint
+mkdir -p /opt/nginx/conf.d/auto-generated
+cat > /opt/nginx/nginx.conf <<'NGINXCONF'
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
@@ -445,36 +466,35 @@ http {
 }
 NGINXCONF
 
-    # Start Nginx container
-    docker run -d \
-        --name nginx \
-        --restart unless-stopped \
-        --network app-network \
-        -p 80:80 \
-        -p 443:443 \
-        -v /opt/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
-        -v /opt/nginx/conf.d:/etc/nginx/conf.d:ro \
-        nginx:alpine
+# Start Nginx container
+docker run -d \
+    --name nginx \
+    --restart unless-stopped \
+    --network app-network \
+    -p 80:80 \
+    -p 443:443 \
+    -v /opt/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
+    -v /opt/nginx/conf.d:/etc/nginx/conf.d:ro \
+    nginx:alpine
+
+# Wait for Nginx to start
+sleep 5
+
+# Verify Nginx is running
+if docker ps | grep -q " nginx$$"; then
+    log "✅ Nginx container started successfully"
     
-    # Wait for Nginx to start
-    sleep 5
-    
-    # Verify Nginx is running
-    if docker ps | grep -q " nginx$"; then
-        log "✅ Nginx container started successfully"
-        
-        # Test health endpoint
-        sleep 2
-        HEALTH_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health || echo "000")
-        if [ "$${HEALTH_CHECK}" = "200" ]; then
-            log "✅ Nginx health endpoint responding correctly (200)"
-        else
-            log "⚠️  WARNING: Nginx health endpoint returned: $${HEALTH_CHECK}"
-        fi
+    # Test health endpoint
+    sleep 2
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health || echo "000")
+    if [ "$${HEALTH_CHECK}" = "200" ]; then
+        log "✅ Nginx health endpoint responding correctly (200)"
     else
-        log "❌ Failed to start Nginx container"
-        docker logs nginx 2>&1 | tail -20
+        log "⚠️  WARNING: Nginx health endpoint returned: $${HEALTH_CHECK}"
     fi
+else
+    log "❌ Failed to start Nginx container"
+    docker logs nginx 2>&1 | tail -20
 fi
 
 # Create systemd service for nginx auto-config
