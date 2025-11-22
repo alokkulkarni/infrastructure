@@ -437,11 +437,11 @@ if nginx -t 2>&1 | tee -a /var/log/user-data.log; then
         
         # Test health endpoint
         sleep 1
-        HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000")
-        if [ "${HEALTH_CHECK}" = "200" ]; then
+        HEALTH_CHECK=$$(curl -s -o /dev/null -w "%%{http_code}" http://localhost/health || echo "000")
+        if [ "$${HEALTH_CHECK}" = "200" ]; then
             log "✅ Nginx health endpoint responding correctly (200)"
         else
-            log "⚠️  WARNING: Nginx health endpoint returned: ${HEALTH_CHECK}"
+            log "⚠️  WARNING: Nginx health endpoint returned: $${HEALTH_CHECK}"
             log "Checking nginx status..."
             systemctl status nginx | tee -a /var/log/user-data.log
         fi
