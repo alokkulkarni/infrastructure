@@ -2,6 +2,13 @@
 # Lightweight User-Data Script for Pre-Built AMI
 # This script only configures the GitHub Actions Runner
 # All packages (Docker, Nginx, AWS CLI, etc.) are pre-installed in the AMI
+#
+# TERRAFORM TEMPLATE ESCAPING RULES:
+# - ${var} = Terraform variable interpolation (will be replaced by Terraform)
+# - $${var} = Literal ${var} in output (Terraform escapes to ${var})
+# - $(cmd) = Bash command substitution (no escaping needed, Terraform ignores $(...))
+# - $var = Regular bash variable (single $, not a Terraform variable)
+# - %%{...} = Literal %{...} in output (Terraform escapes % to %)
 
 set -e
 exec > >(tee -a /var/log/user-data.log)
@@ -29,7 +36,7 @@ log "Configuration:"
 log "  Repository: $${GITHUB_REPO_URL}"
 log "  Runner Name: $${RUNNER_NAME}"
 log "  Runner Labels: $${RUNNER_LABELS}"
-log "  PAT provided: $$(if [ -n "$${GITHUB_PAT}" ] && [ "$${GITHUB_PAT}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
+log "  PAT provided: $(if [ -n "$${GITHUB_PAT}" ] && [ "$${GITHUB_PAT}" != "" ]; then echo 'YES'; else echo 'NO'; fi)"
 
 # Verify pre-installed packages
 log "======================================"
@@ -98,15 +105,15 @@ GITHUB_REACHABLE=false
 MAX_RETRIES=30
 RETRY_DELAY=10
 
-for i in $$(seq 1 $${MAX_RETRIES}); do
-    log "Attempt $$i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
+for i in $(seq 1 $${MAX_RETRIES}); do
+    log "Attempt $i/$${MAX_RETRIES}: Testing GitHub API connectivity..."
     if timeout 10 curl -s -o /dev/null -w "%%{http_code}" https://api.github.com | grep -q "200\|301\|302"; then
         log "✅ GitHub API is reachable"
         GITHUB_REACHABLE=true
         break
     else
         log "⚠️ GitHub API not reachable yet, waiting $${RETRY_DELAY}s..."
-        if [ $$i -lt $${MAX_RETRIES} ]; then
+        if [ $i -lt $${MAX_RETRIES} ]; then
             sleep $${RETRY_DELAY}
         fi
     fi
@@ -114,7 +121,7 @@ done
 
 if [ "$${GITHUB_REACHABLE}" = false ]; then
     log "❌ ERROR: GitHub API unreachable after $${MAX_RETRIES} attempts (5 minutes)"
-    log "Routes: $$(ip route)"
+    log "Routes: $(ip route)"
     log "DNS resolution test:"
     nslookup api.github.com || true
     log "This likely indicates NAT Gateway or routing issues"
@@ -136,12 +143,12 @@ else
 fi
 
 # Extract owner and repo from URL
-REPO_FULL=$$(echo "$${GITHUB_REPO_URL}" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+REPO_FULL=$(echo "$${GITHUB_REPO_URL}" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
 log "Extracted repository: $${REPO_FULL}"
 
 # Generate runner registration token using gh CLI
 log "Generating runner registration token via gh CLI..."
-RUNNER_TOKEN=$$(gh api --method POST "repos/$${REPO_FULL}/actions/runners/registration-token" --jq '.token' 2>&1)
+RUNNER_TOKEN=$(gh api --method POST "repos/$${REPO_FULL}/actions/runners/registration-token" --jq '.token' 2>&1)
 
 if [ -z "$${RUNNER_TOKEN}" ] || [ "$${RUNNER_TOKEN}" == "" ]; then
     log "❌ ERROR: Failed to generate runner token"
