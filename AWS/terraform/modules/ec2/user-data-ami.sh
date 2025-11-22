@@ -133,7 +133,7 @@ log "✅ Internet connectivity confirmed, proceeding with runner configuration"
 log "Authenticating GitHub CLI with PAT..."
 echo "$${GITHUB_PAT}" | gh auth login --with-token
 
-if [ $$? -eq 0 ]; then
+if [ $? -eq 0 ]; then
     log "✅ GitHub CLI authenticated successfully"
     gh auth status
 else
