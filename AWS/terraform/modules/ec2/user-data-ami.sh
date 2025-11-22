@@ -3,11 +3,11 @@
 # This script only configures the GitHub Actions Runner
 # All packages (Docker, Nginx, AWS CLI, etc.) are pre-installed in the AMI
 #
-# TERRAFORM TEMPLATE ESCAPING RULES:
-# - Use $${var} for Terraform variables (becomes ${var} after processing)
-# - Use $(cmd) for bash command substitution (single dollar, Terraform ignores this)
-# - Use $var for regular bash variables (single dollar, not a Terraform variable)
-# - Use %%x to escape percent signs (becomes %x after processing)
+# TERRAFORM TEMPLATE ESCAPING:
+# - Double dollar signs ($$) before braces to escape Terraform variables
+# - Single dollar for bash command substitution with parentheses
+# - Single dollar for regular bash variables
+# - Double percent signs (%%) to escape percent characters
 
 set -e
 exec > >(tee -a /var/log/user-data.log)
