@@ -296,6 +296,10 @@ log "Creating nginx configuration directories..."
 mkdir -p /etc/nginx/conf.d/auto-generated
 mkdir -p /var/log/nginx
 
+# Create placeholder files for includes (to avoid nginx errors before containers start)
+touch /etc/nginx/conf.d/auto-generated/upstreams.conf
+touch /etc/nginx/conf.d/auto-generated/locations.conf
+
 # Create main Nginx configuration
 log "Creating main nginx configuration..."
 cat > /etc/nginx/nginx.conf <<'EOF'
@@ -334,6 +338,9 @@ http {
             return 200 "Nginx reverse proxy is running\n";
             add_header Content-Type text/plain;
         }
+        
+        # Include auto-generated container locations
+        include /etc/nginx/conf.d/auto-generated/locations.conf;
 
         # Default response
         location / {
@@ -342,9 +349,8 @@ http {
         }
     }
 
-    # Include auto-generated configurations
-    include /etc/nginx/conf.d/*.conf;
-    include /etc/nginx/conf.d/auto-generated/*.conf;
+    # Include upstreams
+    include /etc/nginx/conf.d/auto-generated/upstreams.conf;
 }
 EOF
 
@@ -412,12 +418,13 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
 }
 
-generate_config() {
+# Collect container info and store in temp file
+collect_container_info() {
     local container_id=$1
     local container_name=$(docker inspect --format='{{.Name}}' $container_id | sed 's/^\///')
     
-    # Get container IP from app-network
-    local container_ip=$(docker inspect --format='{{.NetworkSettings.Networks.app-network.IPAddress}}' $container_id 2>/dev/null)
+    # Get container IP from app-network using jq for reliability
+    local container_ip=$(docker inspect $container_id | jq -r '.[0].NetworkSettings.Networks["app-network"].IPAddress // empty' 2>/dev/null)
     
     if [ -z "$container_ip" ]; then
         log "Container $container_name not on app-network, skipping"
@@ -428,7 +435,6 @@ generate_config() {
     local nginx_enable=$(docker inspect --format='{{index .Config.Labels "nginx.enable"}}' $container_id)
     local nginx_path=$(docker inspect --format='{{index .Config.Labels "nginx.path"}}' $container_id)
     local nginx_port=$(docker inspect --format='{{index .Config.Labels "nginx.port"}}' $container_id)
-    local nginx_host=$(docker inspect --format='{{index .Config.Labels "nginx.host"}}' $container_id)
     
     # Skip if disabled
     if [ "$nginx_enable" == "false" ]; then
@@ -453,95 +459,112 @@ generate_config() {
         return
     fi
     
-    local config_file="$CONFIG_DIR/$${container_name}.conf"
+    log "Found container: $container_name at $container_ip:$nginx_port path $nginx_path"
     
-    log "Generating config for $container_name"
-    log "  Container IP: $container_ip"
-    log "  Container Port: $nginx_port"
-    log "  Path: $nginx_path"
-    
-    # Generate Nginx config
-    cat > $config_file <<NGINXCONF
-# Auto-generated for $container_name
-# Generated: $(date)
-# Container IP: $container_ip
-
-upstream $${container_name}_backend {
-    server $${container_ip}:$${nginx_port};
+    # Store info in temp file
+    echo "$container_name|$container_ip|$nginx_port|$nginx_path" >> /tmp/nginx-containers.tmp
 }
 
-server {
-    listen 80;
-NGINXCONF
-
-    # Add server_name if specified
-    if [ -n "$nginx_host" ] && [ "$nginx_host" != "<no value>" ]; then
-        echo "    server_name $nginx_host;" >> $config_file
+# Generate consolidated nginx config from all collected containers
+generate_consolidated_config() {
+    local temp_file="/tmp/nginx-containers.tmp"
+    
+    if [ ! -f "$temp_file" ] || [ ! -s "$temp_file" ]; then
+        log "No containers to configure"
+        return
     fi
     
-    cat >> $config_file <<NGINXCONF
+    log "Generating consolidated nginx configuration..."
     
-    location $nginx_path {
-        proxy_pass http://$${container_name}_backend;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
+    # Generate upstreams file
+    local upstream_file="$CONFIG_DIR/upstreams.conf"
+    echo "# Auto-generated upstreams - $(date)" > $upstream_file
+    
+    while IFS='|' read -r name ip port path; do
+        cat >> $upstream_file <<UPSTREAM
+upstream $${name}_backend {
+    server $${ip}:$${port};
+    keepalive 32;
 }
-NGINXCONF
+UPSTREAM
+    done < $temp_file
+    
+    # Generate locations file
+    local locations_file="$CONFIG_DIR/locations.conf"
+    echo "# Auto-generated locations - $(date)" > $locations_file
+    echo "# These locations are included in the main server block" >> $locations_file
+    
+    while IFS='|' read -r name ip port path; do
+        # Add trailing slash to path for proper matching
+        local path_prefix="$path"
+        [ "$path" != "/" ] && path_prefix="$${path}/"
+        
+        cat >> $locations_file <<LOCATION
+
+location $path_prefix {
+    rewrite ^$path/(.*) /\$1 break;
+    proxy_pass http://$${name}_backend;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+}
+LOCATION
+    done < $temp_file
     
     # Test and reload
+    log "Testing nginx configuration..."
     if nginx -t 2>&1 | tee -a $LOG_FILE; then
-        nginx -s reload 2>&1 | tee -a $LOG_FILE
-        log "✅ Config created and loaded: $config_file"
+        systemctl reload nginx 2>&1 | tee -a $LOG_FILE
+        log "✅ Consolidated config created and loaded"
+        log "   Upstreams: $upstream_file"
+        log "   Locations: $locations_file"
     else
         log "❌ Nginx config test failed!"
-        rm -f $config_file
+        rm -f $upstream_file $locations_file
     fi
+    
+    # Cleanup temp file
+    rm -f $temp_file
 }
 
-remove_config() {
-    local container_name=$1
-    local config_file="$CONFIG_DIR/$${container_name}.conf"
+rebuild_all_configs() {
+    log "Rebuilding all container configurations..."
     
-    if [ -f $config_file ]; then
-        log "Removing config for $container_name"
-        rm -f $config_file
-        nginx -t && nginx -s reload
-    fi
+    # Clear temp file
+    rm -f /tmp/nginx-containers.tmp
+    
+    # Collect all containers on app-network
+    docker ps --filter "network=app-network" --format '{{.ID}}' | while read cid; do
+        collect_container_info $cid
+    done
+    
+    # Generate consolidated config
+    generate_consolidated_config
 }
 
 # Initialize with existing containers
 log "Initializing: scanning existing containers on app-network..."
-docker ps --filter "network=app-network" --format '{{.ID}}' | while read cid; do
-    generate_config $cid
-done
+rebuild_all_configs
 
 # Monitor Docker events
 log "Monitoring Docker events..."
 docker events --filter 'type=container' --filter 'event=start' --filter 'event=die' --format '{{json .}}' | while read event; do
     event_type=$(echo $event | jq -r '.status')
-    container_id=$(echo $event | jq -r '.id')
     container_name=$(echo $event | jq -r '.Actor.Attributes.name')
     
     log "Event: $event_type for $container_name"
     
-    case $event_type in
-        start)
-            sleep 2
-            generate_config $container_id
-            ;;
-        die)
-            remove_config $container_name
-            ;;
-    esac
+    # Always rebuild all configs on any container change
+    # This ensures consistency and handles multi-container scenarios
+    sleep 2  # Brief delay to ensure container is fully started/stopped
+    rebuild_all_configs
+done
 done
 AUTOCONFIG
 
