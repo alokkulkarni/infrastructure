@@ -452,7 +452,7 @@ generate_config() {
         return
     fi
     
-    local config_file="$CONFIG_DIR/${container_name}.conf"
+    local config_file="$CONFIG_DIR/$${container_name}.conf"
     
     log "Generating config for $container_name"
     log "  Container IP: $container_ip"
@@ -465,8 +465,8 @@ generate_config() {
 # Generated: $(date)
 # Container IP: $container_ip
 
-upstream ${container_name}_backend {
-    server ${container_ip}:${nginx_port};
+upstream $${container_name}_backend {
+    server $${container_ip}:$${nginx_port};
 }
 
 server {
@@ -481,7 +481,7 @@ NGINXCONF
     cat >> $config_file <<NGINXCONF
     
     location $nginx_path {
-        proxy_pass http://${container_name}_backend;
+        proxy_pass http://$${container_name}_backend;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -508,7 +508,7 @@ NGINXCONF
 
 remove_config() {
     local container_name=$1
-    local config_file="$CONFIG_DIR/${container_name}.conf"
+    local config_file="$CONFIG_DIR/$${container_name}.conf"
     
     if [ -f $config_file ]; then
         log "Removing config for $container_name"
