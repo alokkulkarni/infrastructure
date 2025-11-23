@@ -234,105 +234,47 @@ else
     ./svc.sh status || true
 fi
 
-# Setup Nginx auto-configuration
+# Verify Nginx service is running
 log "======================================"
-log "Setting up Nginx Auto-Configuration"
+log "Verifying Nginx Service"
 log "======================================"
 
-# Create nginx config directory
-mkdir -p /opt/nginx/conf.d
-
-# Create auto-config script
-cat > /opt/nginx/auto-config.sh <<'AUTOCONFIG'
-#!/bin/bash
-# Nginx auto-configuration for Docker containers
-
-NGINX_CONF_DIR="/etc/nginx/conf.d"
-TEMP_DIR="/opt/nginx/conf.d"
-
-generate_config() {
-    local container_name=$${1}
-    local port=$$2
-    local host=$$3
-    local path=$$4
-    
-    # Default path to container name if not specified
-    path=$${path:-/$$container_name}
-    
-    local config_file="$$TEMP_DIR/$${container_name}.conf"
-    
-    cat > $$config_file <<NGINXEOF
-location $$path {
-    proxy_pass http://$${container_name}:$${port};
-    proxy_set_header Host \$$host;
-    proxy_set_header X-Real-IP \$$remote_addr;
-    proxy_set_header X-Forwarded-For \$$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$$scheme;
-}
-NGINXEOF
-    
-    # Copy to nginx and reload
-    cp $$config_file $$NGINX_CONF_DIR/
-    nginx -t && nginx -s reload
-    
-    echo "Generated config for $$container_name at $$path -> :$$port"
-}
-
-remove_config() {
-    local container_name=$${1}
-    local config_file="$$NGINX_CONF_DIR/$${container_name}.conf"
-    
-    if [ -f "$$config_file" ]; then
-        rm $$config_file
-        nginx -t && nginx -s reload
-        echo "Removed config for $$container_name"
-    fi
-}
-
-# Monitor Docker events
-docker events --filter 'type=container' --filter 'event=start' --filter 'event=stop' --format '{{.Status}}:{{.Actor.Attributes.name}}:{{.Actor.Attributes.nginx.port}}:{{.Actor.Attributes.nginx.host}}:{{.Actor.Attributes.nginx.path}}' | while IFS=: read -r status container_name port host path; do
-    case $$status in
-        start)
-            if [ -n "$$port" ]; then
-                generate_config $$container_name $$port $$host $$path
-            fi
-            ;;
-        stop)
-            remove_config $$container_name
-            ;;
-    esac
-done
-AUTOCONFIG
-
-chmod +x /opt/nginx/auto-config.sh
-
-# Create systemd service for nginx auto-config
-cat > /etc/systemd/system/nginx-auto-config.service <<'SYSTEMD'
-[Unit]
-Description=Nginx Auto Configuration Manager
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=root
-ExecStart=/opt/nginx/auto-config.sh
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-SYSTEMD
-
-# Enable and start the service
-systemctl daemon-reload
-systemctl enable nginx-auto-config.service
-systemctl start nginx-auto-config.service
-
-if systemctl is-active --quiet nginx-auto-config.service; then
-    log "✅ Nginx auto-config service started"
+if systemctl is-active --quiet nginx; then
+    log "✅ Native Nginx service is running"
+    log "Nginx version: $(nginx -v 2>&1)"
 else
-    log "⚠️  WARNING: Nginx auto-config service failed to start"
+    log "⚠️  Starting Nginx service..."
+    systemctl start nginx
+    if systemctl is-active --quiet nginx; then
+        log "✅ Nginx started successfully"
+    else
+        log "❌ Failed to start Nginx"
+        systemctl status nginx --no-pager
+    fi
+fi
+
+# Verify nginx-auto-config service
+log "======================================"
+log "Verifying Nginx Auto-Configuration"
+log "======================================"
+
+if [ -f "/usr/local/bin/nginx-auto-config.sh" ]; then
+    log "✅ Nginx auto-config script found"
+    
+    # Ensure service is enabled and running
+    systemctl enable nginx-auto-config.service 2>/dev/null || log "Service already enabled"
+    systemctl restart nginx-auto-config.service
+    
+    if systemctl is-active --quiet nginx-auto-config.service; then
+        log "✅ Nginx auto-config service is running"
+    else
+        log "❌ Nginx auto-config service failed"
+        systemctl status nginx-auto-config.service --no-pager
+    fi
+else
+    log "⚠️  WARNING: Nginx auto-config script not found in AMI"
+    log "Expected location: /usr/local/bin/nginx-auto-config.sh"
+    log "Container configs will not be auto-generated"
 fi
 
 # Final status
