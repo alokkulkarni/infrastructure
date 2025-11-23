@@ -266,8 +266,9 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 systemctl start docker
 systemctl enable docker
 
-# Add ubuntu user to docker group
+# Add ubuntu and runner users to docker group
 usermod -aG docker ubuntu
+usermod -aG docker runner
 
 # Verify Docker installation
 docker --version
@@ -639,6 +640,29 @@ apt-get install -y python3 python3-pip
 apt-get install -y build-essential
 
 echo "Additional tools installation completed"
+
+# Restart GitHub Actions Runner service to apply docker group membership
+log "======================================"
+log "Restarting GitHub Actions Runner Service"
+log "======================================"
+if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
+    log "Restarting runner service to apply docker group membership..."
+    cd $RUNNER_DIR
+    ./svc.sh stop || log "⚠️  Runner service stop had issues"
+    sleep 2
+    ./svc.sh start || log "⚠️  Runner service start had issues"
+    sleep 3
+    
+    if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
+        log "✅ Runner service restarted successfully"
+        log "Runner can now access Docker"
+    else
+        log "⚠️  WARNING: Runner service restart failed"
+        ./svc.sh status || true
+    fi
+else
+    log "⚠️  WARNING: Runner service not found - may need manual configuration"
+fi
 
 # Set up log rotation for Docker
 cat > /etc/logrotate.d/docker <<EOF
