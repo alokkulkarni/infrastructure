@@ -84,8 +84,7 @@ jobs:
                   echo "  Deleting: $existing_name"
                   az ad app federated-credential delete \
                     --id "$app_object_id" \
-                    --federated-credential-id "$existing_name" \
-                    --yes 2>/dev/null || true
+                    --federated-credential-id "$existing_name" 2>/dev/null || true
                 fi
               done
               sleep 2  # Wait for deletions to propagate
@@ -104,8 +103,7 @@ jobs:
               
               az ad app federated-credential delete \
                 --id "$app_object_id" \
-                --federated-credential-id "$cred_name" \
-                --yes 2>/dev/null || true
+                --federated-credential-id "$cred_name" 2>/dev/null || true
               
               sleep 2  # Wait for deletion to propagate
             fi
@@ -136,8 +134,7 @@ jobs:
                   echo "    Deleting: $name"
                   az ad app federated-credential delete \
                     --id "$app_object_id" \
-                    --federated-credential-id "$name" \
-                    --yes 2>/dev/null || true
+                    --federated-credential-id "$name" 2>/dev/null || true
                 done
                 sleep 3
                 
