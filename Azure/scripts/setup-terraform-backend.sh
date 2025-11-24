@@ -79,50 +79,52 @@ fi
 # Check if storage account exists
 echo -e "${YELLOW}Checking if storage account exists...${NC}"
 
-# First check if storage account name is available globally
-echo "Checking storage account name availability..."
-NAME_CHECK=$(az storage account check-name --name $STORAGE_ACCOUNT_NAME --query "{available:nameAvailable, reason:reason, message:message}" -o json)
-echo "Name check result: $NAME_CHECK"
-
-# Check if it exists in our resource group
+# Try to get storage account from our resource group
 if az storage account show --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP_NAME &> /dev/null; then
     echo -e "${GREEN}✓ Storage account already exists in our resource group, reusing it${NC}"
 else
-    # Check if name is taken globally
-    IS_AVAILABLE=$(echo "$NAME_CHECK" | grep -o '"available":\s*true' || echo "false")
+    echo -e "${YELLOW}Storage account not found in resource group, attempting to create...${NC}"
     
-    if [[ "$NAME_CHECK" == *'"available": true'* ]]; then
-        echo -e "${YELLOW}Creating storage account...${NC}"
-        if az storage account create \
-            --name $STORAGE_ACCOUNT_NAME \
-            --resource-group $RESOURCE_GROUP_NAME \
-            --location $AZURE_LOCATION \
-            --sku Standard_LRS \
-            --encryption-services blob \
-            --min-tls-version TLS1_2 \
-            --allow-blob-public-access false \
-            --https-only true \
-            --tags Environment=shared ManagedBy=Terraform Purpose=TerraformState; then
-            echo -e "${GREEN}✓ Storage account created${NC}"
+    # Try to create storage account
+    # If name is taken globally by another subscription, this will fail with AlreadyExists error
+    if az storage account create \
+        --name $STORAGE_ACCOUNT_NAME \
+        --resource-group $RESOURCE_GROUP_NAME \
+        --location $AZURE_LOCATION \
+        --sku Standard_LRS \
+        --encryption-services blob \
+        --min-tls-version TLS1_2 \
+        --allow-blob-public-access false \
+        --https-only true \
+        --tags Environment=shared ManagedBy=Terraform Purpose=TerraformState 2>&1 | tee /tmp/storage_create.log; then
+        echo -e "${GREEN}✓ Storage account created${NC}"
+    else
+        # Check if it failed because name is taken
+        if grep -q "StorageAccountAlreadyTaken\|AlreadyExists" /tmp/storage_create.log; then
+            echo -e "${RED}ERROR: Storage account name '$STORAGE_ACCOUNT_NAME' is globally taken${NC}"
+            echo ""
+            echo "The storage account name is already in use by another Azure subscription."
+            echo "Storage account names must be globally unique across all of Azure."
+            echo ""
+            echo "Solutions:"
+            echo "  1. Use a different PROJECT_NAME environment variable"
+            echo "  2. Manually specify a unique storage account name"
+            echo "  3. If this storage account was yours, it may be soft-deleted (wait 24h)"
+            echo ""
+            echo "Current naming: ${PROJECT_NAME}tfstate${SUBSCRIPTION_SHORT}"
+            exit 1
         else
             echo -e "${RED}ERROR: Failed to create storage account${NC}"
+            echo "Error details:"
+            cat /tmp/storage_create.log
+            echo ""
             echo "This could be due to:"
-            echo "  1. Insufficient permissions"
+            echo "  1. Insufficient permissions (need Storage Account Contributor)"
             echo "  2. Subscription quota exceeded"
-            echo "  3. Location not supported"
+            echo "  3. Location not supported for storage accounts"
+            echo "  4. Network restrictions"
             exit 1
         fi
-    else
-        echo -e "${RED}ERROR: Storage account name '$STORAGE_ACCOUNT_NAME' is not available${NC}"
-        echo "Name check details: $NAME_CHECK"
-        echo ""
-        echo "This usually means:"
-        echo "  1. The name is already taken by another subscription"
-        echo "  2. The name was recently deleted (soft-delete period)"
-        echo ""
-        echo "Attempting to check if it exists elsewhere..."
-        az storage account show --name $STORAGE_ACCOUNT_NAME 2>&1 || echo "Not accessible in current subscription"
-        exit 1
     fi
 fi
 

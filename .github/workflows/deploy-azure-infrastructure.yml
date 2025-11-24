@@ -67,7 +67,10 @@ jobs:
           echo ""
           echo "Verifying role assignments:"
           APP_ID="${{ secrets.AZURE_CLIENT_ID }}"
-          az role assignment list --assignee "$APP_ID" --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --output table || echo "Failed to list role assignments"
+          az role assignment list \
+            --assignee "$APP_ID" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --output table || echo "Failed to list role assignments"
 
       - name: Setup Terraform backend
         id: backend
