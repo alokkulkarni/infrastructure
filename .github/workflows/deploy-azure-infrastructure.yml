@@ -52,7 +52,13 @@ jobs:
 
       - name: Set Azure Subscription
         run: |
+          echo "Available subscriptions:"
+          az account list --query "[].{name:name, id:id, state:state}" -o table
+          echo ""
+          echo "Attempting to set subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          echo ""
+          echo "Current subscription:"
           az account show
 
       - name: Setup Terraform backend
