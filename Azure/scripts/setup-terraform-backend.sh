@@ -30,6 +30,11 @@ if [ -z "$AZURE_LOCATION" ]; then
     exit 1
 fi
 
+if [ -z "$ENVIRONMENT_TAG" ]; then
+    echo -e "${RED}Error: ENVIRONMENT_TAG environment variable is not set${NC}"
+    exit 1
+fi
+
 # Get Azure Subscription ID from environment (passed from GitHub Actions)
 if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
     echo -e "${RED}Error: AZURE_SUBSCRIPTION_ID environment variable is not set${NC}"
@@ -40,16 +45,20 @@ echo -e "${GREEN}Using subscription ID from environment${NC}"
 # Derive resource names dynamically
 PROJECT_NAME="${PROJECT_NAME:-testcontainers}"
 # Storage account names must be 3-24 characters, lowercase letters and numbers only
-# Using first 8 chars of subscription ID to ensure uniqueness
+# Using first 8 chars of subscription ID to ensure uniqueness across Azure
 SUBSCRIPTION_SHORT=$(echo "$AZURE_SUBSCRIPTION_ID" | tr -d '-' | cut -c1-8)
 RESOURCE_GROUP_NAME="${PROJECT_NAME}-tfstate-rg"
 STORAGE_ACCOUNT_NAME="${PROJECT_NAME}tfstate${SUBSCRIPTION_SHORT}"
-CONTAINER_NAME="tfstate"
+
+# Container name based on environment tag for isolation
+# Convert environment tag to lowercase and replace invalid chars
+CONTAINER_NAME=$(echo "$ENVIRONMENT_TAG" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
 
 echo -e "${YELLOW}Configuration:${NC}"
 echo "  Resource Group: $RESOURCE_GROUP_NAME"
-echo "  Storage Account: $STORAGE_ACCOUNT_NAME"
-echo "  Container: $CONTAINER_NAME"
+echo "  Storage Account: $STORAGE_ACCOUNT_NAME (shared)"
+echo "  Container: $CONTAINER_NAME (unique per environment tag)"
+echo "  Environment Tag: $ENVIRONMENT_TAG"
 echo "  Location: $AZURE_LOCATION"
 echo ""
 
@@ -69,21 +78,52 @@ fi
 
 # Check if storage account exists
 echo -e "${YELLOW}Checking if storage account exists...${NC}"
+
+# First check if storage account name is available globally
+echo "Checking storage account name availability..."
+NAME_CHECK=$(az storage account check-name --name $STORAGE_ACCOUNT_NAME --query "{available:nameAvailable, reason:reason, message:message}" -o json)
+echo "Name check result: $NAME_CHECK"
+
+# Check if it exists in our resource group
 if az storage account show --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP_NAME &> /dev/null; then
-    echo -e "${GREEN}✓ Storage account already exists, reusing existing storage account${NC}"
+    echo -e "${GREEN}✓ Storage account already exists in our resource group, reusing it${NC}"
 else
-    echo -e "${YELLOW}Creating storage account...${NC}"
-    az storage account create \
-        --name $STORAGE_ACCOUNT_NAME \
-        --resource-group $RESOURCE_GROUP_NAME \
-        --location $AZURE_LOCATION \
-        --sku Standard_LRS \
-        --encryption-services blob \
-        --min-tls-version TLS1_2 \
-        --allow-blob-public-access false \
-        --https-only true \
-        --tags Environment=shared ManagedBy=Terraform Purpose=TerraformState
-    echo -e "${GREEN}✓ Storage account created${NC}"
+    # Check if name is taken globally
+    IS_AVAILABLE=$(echo "$NAME_CHECK" | grep -o '"available":\s*true' || echo "false")
+    
+    if [[ "$NAME_CHECK" == *'"available": true'* ]]; then
+        echo -e "${YELLOW}Creating storage account...${NC}"
+        if az storage account create \
+            --name $STORAGE_ACCOUNT_NAME \
+            --resource-group $RESOURCE_GROUP_NAME \
+            --location $AZURE_LOCATION \
+            --sku Standard_LRS \
+            --encryption-services blob \
+            --min-tls-version TLS1_2 \
+            --allow-blob-public-access false \
+            --https-only true \
+            --tags Environment=shared ManagedBy=Terraform Purpose=TerraformState; then
+            echo -e "${GREEN}✓ Storage account created${NC}"
+        else
+            echo -e "${RED}ERROR: Failed to create storage account${NC}"
+            echo "This could be due to:"
+            echo "  1. Insufficient permissions"
+            echo "  2. Subscription quota exceeded"
+            echo "  3. Location not supported"
+            exit 1
+        fi
+    else
+        echo -e "${RED}ERROR: Storage account name '$STORAGE_ACCOUNT_NAME' is not available${NC}"
+        echo "Name check details: $NAME_CHECK"
+        echo ""
+        echo "This usually means:"
+        echo "  1. The name is already taken by another subscription"
+        echo "  2. The name was recently deleted (soft-delete period)"
+        echo ""
+        echo "Attempting to check if it exists elsewhere..."
+        az storage account show --name $STORAGE_ACCOUNT_NAME 2>&1 || echo "Not accessible in current subscription"
+        exit 1
+    fi
 fi
 
 # Enable versioning
@@ -151,17 +191,20 @@ echo ""
 echo -e "${GREEN}✓ Terraform backend setup complete!${NC}"
 echo ""
 echo -e "${YELLOW}IMPORTANT: This script is idempotent and reuses existing resources.${NC}"
-echo "- Resource group, storage account, and container are shared across all environments"
-echo "- Each environment uses a different state file blob (key)"
+echo "- Shared resource group: $RESOURCE_GROUP_NAME"
+echo "- Shared storage account: $STORAGE_ACCOUNT_NAME"
+echo "- Environment-specific container: $CONTAINER_NAME"
+echo "- Each environment tag gets its own container for complete isolation"
 echo "- No resources are recreated if they already exist"
 echo ""
 echo -e "${YELLOW}Backend Configuration:${NC}"
 echo "  resource_group_name  = \"$RESOURCE_GROUP_NAME\""
 echo "  storage_account_name = \"$STORAGE_ACCOUNT_NAME\""
 echo "  container_name       = \"$CONTAINER_NAME\""
-echo "  key                  = \"azure/ENV/terraform.tfstate\""
+echo "  key                  = \"terraform.tfstate\""
 echo ""
 
 # Export for GitHub Actions workflow consumption
 echo "export TF_BACKEND_RESOURCE_GROUP=\"$RESOURCE_GROUP_NAME\""
 echo "export TF_BACKEND_STORAGE_ACCOUNT=\"$STORAGE_ACCOUNT_NAME\""
+echo "export TF_BACKEND_CONTAINER=\"$CONTAINER_NAME\""

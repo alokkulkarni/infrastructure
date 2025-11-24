@@ -35,6 +35,7 @@ jobs:
     outputs:
       backend_resource_group: ${{ steps.backend.outputs.backend_resource_group }}
       backend_storage_account: ${{ steps.backend.outputs.backend_storage_account }}
+      backend_container: ${{ steps.backend.outputs.backend_container }}
     permissions:
       id-token: write   # Required for OIDC
       contents: read
@@ -79,22 +80,25 @@ jobs:
           export PROJECT_NAME=testcontainers
           export AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}
           export ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}
+          export ENVIRONMENT_TAG=${{ env.ENVIRONMENT_TAG }}
           
           # Run setup script with bash -x for debugging
-          echo "Running setup script with debug output..."
+          echo "Running setup script for environment tag: ${{ env.ENVIRONMENT_TAG }}"
           bash -x ./scripts/setup-terraform-backend.sh 2>&1 | tee setup_output.log
           
           # Extract outputs from log - strip ANSI color codes and extract values
           echo "Extracting backend configuration from setup output..."
           BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
           BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
+          BACKEND_CONTAINER=$(grep "export TF_BACKEND_CONTAINER" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
           
           echo "Extracted values:"
           echo "  Resource Group: ${BACKEND_RG}"
           echo "  Storage Account: ${BACKEND_SA}"
+          echo "  Container: ${BACKEND_CONTAINER}"
           
           # Validate outputs are not empty
-          if [ -z "$BACKEND_RG" ] || [ -z "$BACKEND_SA" ]; then
+          if [ -z "$BACKEND_RG" ] || [ -z "$BACKEND_SA" ] || [ -z "$BACKEND_CONTAINER" ]; then
             echo "ERROR: Failed to extract backend configuration"
             echo "Log contents:"
             cat setup_output.log
@@ -103,6 +107,7 @@ jobs:
           
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
+          echo "backend_container=${BACKEND_CONTAINER}" >> $GITHUB_OUTPUT
 
   terraform-plan:
     name: Terraform Plan
@@ -160,12 +165,14 @@ jobs:
           echo "Received backend outputs:"
           echo "  Resource Group: ${{ needs.setup-backend.outputs.backend_resource_group }}"
           echo "  Storage Account: ${{ needs.setup-backend.outputs.backend_storage_account }}"
+          echo "  Container: ${{ needs.setup-backend.outputs.backend_container }}"
           
           # Validate outputs are not empty
-          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_container }}" ]; then
             echo "ERROR: Backend outputs are empty!"
             echo "Resource Group: '${{ needs.setup-backend.outputs.backend_resource_group }}'"
             echo "Storage Account: '${{ needs.setup-backend.outputs.backend_storage_account }}'"
+            echo "Container: '${{ needs.setup-backend.outputs.backend_container }}'"
             exit 1
           fi
           
@@ -174,8 +181,8 @@ jobs:
             backend "azurerm" {
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
-              container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
+              key                  = "terraform.tfstate"
               use_oidc             = true
             }
           }
@@ -284,12 +291,14 @@ jobs:
           echo "Received backend outputs:"
           echo "  Resource Group: ${{ needs.setup-backend.outputs.backend_resource_group }}"
           echo "  Storage Account: ${{ needs.setup-backend.outputs.backend_storage_account }}"
+          echo "  Container: ${{ needs.setup-backend.outputs.backend_container }}"
           
           # Validate outputs are not empty
-          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_container }}" ]; then
             echo "ERROR: Backend outputs are empty!"
             echo "Resource Group: '${{ needs.setup-backend.outputs.backend_resource_group }}'"
             echo "Storage Account: '${{ needs.setup-backend.outputs.backend_storage_account }}'"
+            echo "Container: '${{ needs.setup-backend.outputs.backend_container }}'"
             exit 1
           fi
           
@@ -298,8 +307,8 @@ jobs:
             backend "azurerm" {
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
-              container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
+              key                  = "terraform.tfstate"
               use_oidc             = true
             }
           }
@@ -394,11 +403,11 @@ jobs:
         continue-on-error: true
         run: |
           # Try to check if state file exists in Azure Storage
-          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ] && [ -n "${{ needs.setup-backend.outputs.backend_container }}" ]; then
             BLOB_EXISTS=$(az storage blob exists \
               --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
-              --container-name tfstate \
-              --name azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate \
+              --container-name ${{ needs.setup-backend.outputs.backend_container }} \
+              --name terraform.tfstate \
               --auth-mode login \
               --query exists -o tsv)
             echo "state_exists=$BLOB_EXISTS" >> $GITHUB_OUTPUT
@@ -446,8 +455,8 @@ jobs:
             backend "azurerm" {
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
-              container_name       = "tfstate"
-              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
+              key                  = "terraform.tfstate"
               use_oidc             = true
             }
           }
@@ -497,31 +506,33 @@ jobs:
           
           echo "✅ Key Vault purge initiated"
 
-      - name: Clean up Terraform state
+      - name: Clean up Terraform state and container
         if: steps.destroy.outputs.success == 'true'
         continue-on-error: true
         run: |
-          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
-            echo "Destroy succeeded, cleaning up state file..."
-            az storage blob delete \
+          if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ] && [ -n "${{ needs.setup-backend.outputs.backend_container }}" ]; then
+            echo "Destroy succeeded, cleaning up environment container..."
+            # Delete the entire container for this environment tag
+            az storage container delete \
               --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
-              --container-name tfstate \
-              --name azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate \
+              --name ${{ needs.setup-backend.outputs.backend_container }} \
               --auth-mode login
-            echo "✅ State file deleted"
+            echo "✅ Container '${{ needs.setup-backend.outputs.backend_container }}' deleted (environment-specific cleanup complete)"
           fi
 
       - name: State cleanup skipped
         if: steps.destroy.outputs.success != 'true'
         run: |
-          echo "⚠️ Destroy failed or was skipped, preserving state file for manual cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Destroy failed or was skipped, preserving container for manual cleanup" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Manual Cleanup Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Container: ${{ needs.setup-backend.outputs.backend_container }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "To manually clean up:" >> $GITHUB_STEP_SUMMARY
           echo "1. Fix the destroy issue" >> $GITHUB_STEP_SUMMARY
           echo "2. Run: \`terraform destroy\`" >> $GITHUB_STEP_SUMMARY
-          echo "3. Delete state file manually if needed" >> $GITHUB_STEP_SUMMARY
+          echo "3. Delete container manually: \`az storage container delete --account-name STORAGE_ACCOUNT --name ${{ needs.setup-backend.outputs.backend_container }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Rollback Summary
         if: always()
@@ -536,12 +547,13 @@ jobs:
           echo "- ✅ Purged soft-deleted Key Vaults" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ steps.destroy.outputs.success }}" == "true" ]; then
-            echo "- ✅ Cleaned up Terraform state file" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Cleaned up environment container (tag: ${{ env.ENVIRONMENT_TAG }})" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- ⚠️ State file preserved (destroy incomplete)" >> $GITHUB_STEP_SUMMARY
+            echo "- ⚠️ Container preserved (destroy incomplete)" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Backend resources (Resource Group and Storage Account) are preserved for future deployments." >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Shared backend resources (Resource Group and Storage Account) are preserved for other environments." >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Only the container for environment tag '${{ env.ENVIRONMENT_TAG }}' was cleaned up." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Please review the workflow logs to identify the failure cause." >> $GITHUB_STEP_SUMMARY
