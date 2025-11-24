@@ -193,13 +193,18 @@ jobs:
           echo "Backend configuration:"
           cat backend.tf
 
+      - name: Sanitize Azure secrets for terraform-plan
+        run: |
+          # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "TF_VAR_github_pat=$(echo -n '${{ secrets.PAT_TOKEN }}' | tr -d '\n\r')" >> $GITHUB_ENV
+
       - name: Terraform Init
         working-directory: Azure/terraform
         run: terraform init
         env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
 
@@ -214,10 +219,6 @@ jobs:
       - name: Terraform Plan
         working-directory: Azure/terraform
         env:
-          TF_VAR_github_pat: ${{ secrets.PAT_TOKEN }}
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
         run: |
@@ -319,13 +320,18 @@ jobs:
           echo "Backend configuration:"
           cat backend.tf
 
+      - name: Sanitize Azure secrets
+        run: |
+          # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "TF_VAR_github_pat=$(echo -n '${{ secrets.PAT_TOKEN }}' | tr -d '\n\r')" >> $GITHUB_ENV
+
       - name: Terraform Init
         working-directory: Azure/terraform
         run: terraform init
         env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
 
@@ -338,10 +344,6 @@ jobs:
       - name: Terraform Apply
         working-directory: Azure/terraform
         env:
-          TF_VAR_github_pat: ${{ secrets.PAT_TOKEN }}
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
         run: |
