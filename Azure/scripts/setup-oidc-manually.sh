@@ -177,21 +177,48 @@ create_federated_credential() {
     
     print_info "Validating credential: $name"
     
-    # Check if credential already exists and get its subject
-    EXISTING_SUBJECT=$(az ad app federated-credential list \
+    # First, check if a credential with this SUBJECT already exists (regardless of name)
+    # Azure enforces uniqueness on issuer+subject combination
+    EXISTING_CRED_WITH_SUBJECT=$(az ad app federated-credential list \
         --id "$OBJECT_ID" \
-        --query "[?name=='$name'].subject" -o tsv 2>/dev/null || echo "")
+        --query "[?subject=='$subject'].{name:name,subject:subject}" -o json 2>/dev/null || echo "[]")
     
-    if [ -n "$EXISTING_SUBJECT" ]; then
-        # Credential exists - validate subject matches
+    EXISTING_NAME=$(echo "$EXISTING_CRED_WITH_SUBJECT" | jq -r '.[0].name // empty')
+    EXISTING_SUBJECT=$(echo "$EXISTING_CRED_WITH_SUBJECT" | jq -r '.[0].subject // empty')
+    
+    if [ -n "$EXISTING_NAME" ] && [ -n "$EXISTING_SUBJECT" ]; then
+        # Credential with this subject exists
         if [ "$EXISTING_SUBJECT" = "$subject" ]; then
-            print_success "  Credential is valid: $name"
-            echo "    Subject: $subject"
-            return 0
-        else
-            print_warning "  Credential exists but subject mismatch"
+            if [ "$EXISTING_NAME" = "$name" ]; then
+                # Perfect match - credential is valid
+                print_success "  Credential is valid: $name"
+                echo "    Subject: $subject"
+                return 0
+            else
+                # Subject matches but name is different - delete old one
+                print_warning "  Credential exists with different name: $EXISTING_NAME"
+                echo "    Expected name: $name"
+                echo "    Subject: $subject"
+                print_info "  Deleting credential with old name"
+                
+                az ad app federated-credential delete \
+                    --id "$OBJECT_ID" \
+                    --federated-credential-id "$EXISTING_NAME" \
+                    --yes 2>/dev/null || true
+                
+                sleep 2  # Wait for deletion to propagate
+            fi
+        fi
+    else
+        # Check if credential with this NAME exists (but different subject)
+        EXISTING_SUBJECT_FOR_NAME=$(az ad app federated-credential list \
+            --id "$OBJECT_ID" \
+            --query "[?name=='$name'].subject" -o tsv 2>/dev/null || echo "")
+        
+        if [ -n "$EXISTING_SUBJECT_FOR_NAME" ] && [ "$EXISTING_SUBJECT_FOR_NAME" != "$subject" ]; then
+            print_warning "  Credential name exists but subject mismatch"
             echo "    Expected: $subject"
-            echo "    Found:    $EXISTING_SUBJECT"
+            echo "    Found:    $EXISTING_SUBJECT_FOR_NAME"
             print_info "  Deleting invalid credential"
             
             az ad app federated-credential delete \
@@ -213,9 +240,51 @@ create_federated_credential() {
             \"subject\": \"$subject\",
             \"audiences\": [\"api://AzureADTokenExchange\"],
             \"description\": \"$description\"
-        }" > /dev/null
-    print_success "  Created: $name"
-    echo "    Subject: $subject"
+        }" > /dev/null 2>&1
+    
+    if [ $? -eq 0 ]; then
+        print_success "  Created: $name"
+        echo "    Subject: $subject"
+    else
+        print_error "  Failed to create credential: $name"
+        print_info "  Checking if credential exists with different name..."
+        
+        # List all credentials with this subject
+        ALL_CREDS=$(az ad app federated-credential list \
+            --id "$OBJECT_ID" \
+            --query "[?subject=='$subject'].name" -o tsv 2>/dev/null || echo "")
+        
+        if [ -n "$ALL_CREDS" ]; then
+            print_warning "  Found existing credentials with this subject:"
+            echo "$ALL_CREDS" | while read cred_name; do
+                echo "    - $cred_name"
+                print_info "  Deleting: $cred_name"
+                az ad app federated-credential delete \
+                    --id "$OBJECT_ID" \
+                    --federated-credential-id "$cred_name" \
+                    --yes 2>/dev/null || true
+            done
+            
+            sleep 3  # Wait for all deletions
+            
+            # Retry creation
+            print_info "  Retrying creation: $name"
+            az ad app federated-credential create \
+                --id "$OBJECT_ID" \
+                --parameters "{
+                    \"name\": \"$name\",
+                    \"issuer\": \"https://token.actions.githubusercontent.com\",
+                    \"subject\": \"$subject\",
+                    \"audiences\": [\"api://AzureADTokenExchange\"],
+                    \"description\": \"$description\"
+                }" > /dev/null
+            print_success "  Created: $name"
+            echo "    Subject: $subject"
+        else
+            print_error "  Unable to resolve credential conflict"
+            exit 1
+        fi
+    fi
 }
 
 # Create federated credentials
