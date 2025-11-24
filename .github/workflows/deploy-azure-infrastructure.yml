@@ -161,11 +161,14 @@ jobs:
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
               key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              use_oidc             = true
             }
           }
           EOF
+          echo "Backend configuration:"
+          cat backend.tf
 
-      - name: Terraform Init
+      - name: Download plan
         working-directory: Azure/terraform
         run: terraform init
         env:
@@ -268,9 +271,12 @@ jobs:
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "tfstate"
               key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              use_oidc             = true
             }
           }
           EOF
+          echo "Backend configuration:"
+          cat backend.tf
 
       - name: Terraform Init
         working-directory: Azure/terraform
