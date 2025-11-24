@@ -40,18 +40,21 @@ resource "azurerm_resource_group" "main" {
 }
 
 # OIDC Module for GitHub Actions
-module "oidc" {
-  source = "./modules/oidc"
-
-  project_name    = var.project_name
-  environment     = var.environment
-  environment_tag = var.environment_tag
-  location        = var.location
-  github_org      = var.github_org
-  github_repo     = var.github_repo
-  subscription_id = data.azurerm_client_config.current.subscription_id
-  tenant_id       = data.azurerm_client_config.current.tenant_id
-}
+# NOTE: OIDC is already configured manually via setup-oidc-manually.sh
+# This module requires Azure AD admin privileges and is not needed for runtime infrastructure
+# Uncomment only if you want Terraform to manage OIDC configuration
+# module "oidc" {
+#   source = "./modules/oidc"
+#
+#   project_name    = var.project_name
+#   environment     = var.environment
+#   environment_tag = var.environment_tag
+#   location        = var.location
+#   github_org      = var.github_org
+#   github_repo     = var.github_repo
+#   subscription_id = data.azurerm_client_config.current.subscription_id
+#   tenant_id       = data.azurerm_client_config.current.tenant_id
+# }
 
 # Virtual Network Module
 module "networking" {

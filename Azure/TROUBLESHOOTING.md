@@ -1,0 +1,473 @@
+# Azure Infrastructure Troubleshooting Guide
+
+## Common Terraform Errors and Solutions
+
+### 1. MissingSubscriptionRegistration Error
+
+**Error:**
+```
+Error: MissingSubscriptionRegistration: The subscription is not registered to use namespace 'Microsoft.Network'
+```
+
+**Cause:** Azure resource providers are not registered in your subscription.
+
+**Solution:**
+
+Run the provider registration script:
+```bash
+cd infrastructure/Azure/scripts
+./register-azure-providers.sh
+```
+
+Or manually register providers:
+```bash
+# Register all common providers
+az provider register --namespace Microsoft.Network
+az provider register --namespace Microsoft.Compute
+az provider register --namespace Microsoft.Storage
+az provider register --namespace Microsoft.ContainerRegistry
+az provider register --namespace Microsoft.KeyVault
+
+# Check registration status
+az provider list --query "[?registrationState=='Registering' || registrationState=='NotRegistered']" -o table
+```
+
+**Prevention:** Run the registration script before first Terraform deployment.
+
+---
+
+### 2. Authorization_RequestDenied (Azure AD Application)
+
+**Error:**
+```
+Error: Could not create application
+ApplicationsClient.BaseClient.Post(): unexpected status 403 with OData error: 
+Authorization_RequestDenied: Insufficient privileges to complete the operation.
+```
+
+**Cause:** The service principal or user running Terraform lacks Azure AD admin permissions to create applications.
+
+**Solutions:**
+
+#### Option A: Use Manual OIDC Setup (Recommended)
+OIDC is already set up manually via scripts. The Terraform OIDC module is redundant and commented out.
+
+```bash
+# OIDC is managed manually
+cd infrastructure/Azure/scripts
+./setup-oidc-manually.sh alokkulkarni infrastructure dev
+```
+
+The Terraform OIDC module is disabled by default in `main.tf`.
+
+#### Option B: Grant Azure AD Permissions
+If you need Terraform to manage OIDC:
+
+1. Grant Application.ReadWrite.All permission to the service principal
+2. Requires Azure AD admin privileges
+3. Uncomment the OIDC module in `terraform/main.tf`
+
+**Prevention:** Keep OIDC management separate from infrastructure deployment.
+
+---
+
+### 3. Authentication Failures
+
+**Error:**
+```
+Error: Unable to authenticate with Azure CLI
+```
+
+**Solutions:**
+
+```bash
+# Check current authentication
+az account show
+
+# Re-authenticate
+az login
+
+# Set correct subscription
+az account set --subscription "YOUR_SUBSCRIPTION_ID"
+
+# For GitHub Actions (OIDC)
+# Verify these secrets are set:
+# - AZURE_CLIENT_ID
+# - AZURE_TENANT_ID
+# - AZURE_SUBSCRIPTION_ID
+```
+
+---
+
+### 4. Backend State Lock Timeout
+
+**Error:**
+```
+Error: Error locking state: Error acquiring the state lock
+```
+
+**Cause:** Previous Terraform operation didn't complete cleanly, leaving state locked.
+
+**Solutions:**
+
+```bash
+# Check lock status
+az storage blob show \
+  --account-name testcontainerstfstate2745ace7 \
+  --container-name YOUR_CONTAINER \
+  --name terraform.tfstate \
+  --auth-mode login
+
+# Force unlock (use with caution!)
+terraform force-unlock LOCK_ID
+
+# Alternative: Wait 2-5 minutes for auto-unlock
+```
+
+**Prevention:** Always let Terraform operations complete. If cancelled, run `terraform apply` again to clean up.
+
+---
+
+### 5. Subscription ID Not Found
+
+**Error:**
+```
+Error: SubscriptionNotFound: The subscription was not found
+```
+
+**Cause:** Subscription context not set correctly or RBAC permissions missing.
+
+**Solutions:**
+
+```bash
+# List available subscriptions
+az account list --output table
+
+# Set correct subscription
+az account set --subscription "2745ace7-ad28-4d41-ae4c-eeb28f54ffd2"
+
+# Verify
+az account show --query id -o tsv
+
+# In GitHub Actions workflow, ensure AZURE_SUBSCRIPTION_ID is set correctly
+```
+
+---
+
+### 6. Storage Account Name Conflict
+
+**Error:**
+```
+Error: The storage account name 'testcontainerstfstate...' is already taken
+```
+
+**Cause:** Storage account names are globally unique across all of Azure.
+
+**Solutions:**
+
+```bash
+# Option 1: Use existing storage account
+# The setup script checks for existing accounts and reuses them
+
+# Option 2: Change project name
+export PROJECT_NAME="myproject"
+./setup-terraform-backend.sh
+
+# Option 3: Manually set unique name
+STORAGE_ACCOUNT="uniquename$(echo $SUBSCRIPTION_ID | cut -c1-8)"
+```
+
+---
+
+### 7. Insufficient RBAC Permissions
+
+**Error:**
+```
+Error: Authorization failed for this request
+```
+
+**Required Roles:**
+- Contributor (create/modify resources)
+- User Access Administrator (assign roles)
+- Storage Account Contributor (backend state)
+- Storage Blob Data Contributor (backend state blobs)
+
+**Check permissions:**
+```bash
+az role assignment list \
+  --assignee $(az account show --query user.name -o tsv) \
+  --output table
+```
+
+**Request permissions from admin:**
+```bash
+# Admin grants permissions
+az role assignment create \
+  --assignee user@example.com \
+  --role "Contributor" \
+  --scope /subscriptions/YOUR_SUBSCRIPTION_ID
+```
+
+---
+
+### 8. Resource Already Exists
+
+**Error:**
+```
+Error: A resource with the ID already exists
+```
+
+**Cause:** Resource was created outside Terraform, or state is out of sync.
+
+**Solutions:**
+
+```bash
+# Option 1: Import existing resource
+terraform import azurerm_resource_group.main /subscriptions/.../resourceGroups/...
+
+# Option 2: Remove from state (if recreating)
+terraform state rm azurerm_resource_group.main
+
+# Option 3: Refresh state
+terraform refresh
+```
+
+---
+
+### 9. Virtual Network Deployment Failures
+
+**Error:**
+```
+Error: creating Virtual Network: unexpected status 409 (409 Conflict)
+```
+
+**Causes:**
+- Provider not registered (see #1)
+- Network CIDR conflicts with existing VNets
+- Region quota exceeded
+
+**Solutions:**
+
+```bash
+# Check existing VNets
+az network vnet list -o table
+
+# Check quotas
+az vm list-usage --location eastus -o table | grep -i network
+
+# Adjust CIDR ranges in terraform.tfvars
+vnet_address_space = ["10.1.0.0/16"]  # Change to avoid conflicts
+```
+
+---
+
+## Quick Diagnostic Commands
+
+### Check Azure Configuration
+```bash
+# Current subscription
+az account show --query "{Name:name, ID:id, Tenant:tenantId}" -o table
+
+# Provider registration status
+az provider list --query "[?registrationState!='Registered'].{Namespace:namespace, State:registrationState}" -o table
+
+# Role assignments
+az role assignment list --assignee $(az account show --query user.name -o tsv) --output table
+
+# Resource group status
+az group list --query "[].{Name:name, Location:location, State:properties.provisioningState}" -o table
+```
+
+### Check Terraform State
+```bash
+# List resources in state
+terraform state list
+
+# Show specific resource
+terraform state show azurerm_resource_group.main
+
+# Validate configuration
+terraform validate
+
+# Check plan
+terraform plan -detailed-exitcode
+```
+
+### Check Backend Configuration
+```bash
+# List storage containers
+az storage container list \
+  --account-name testcontainerstfstate2745ace7 \
+  --auth-mode login \
+  --output table
+
+# Check blob properties
+az storage blob show \
+  --account-name testcontainerstfstate2745ace7 \
+  --container-name YOUR_CONTAINER \
+  --name terraform.tfstate \
+  --auth-mode login \
+  --query "{Name:name, Size:properties.contentLength, Modified:properties.lastModified}"
+```
+
+---
+
+## Workflow-Specific Issues
+
+### GitHub Actions Failures
+
+**Check workflow logs:**
+1. Go to Actions tab in GitHub
+2. Select failed workflow run
+3. Check each job's logs
+4. Look for specific error messages
+
+**Common issues:**
+
+#### OIDC Authentication Fails
+```
+Error: Failed to get OIDC token
+```
+
+**Solution:**
+- Verify GitHub Secrets are set correctly:
+  - AZURE_CLIENT_ID
+  - AZURE_TENANT_ID  
+  - AZURE_SUBSCRIPTION_ID
+- Check workflow has `id-token: write` permission
+- Verify federated credentials in Azure AD app match repository
+
+#### Backend Not Found
+```
+Error: Failed to get existing workspaces
+```
+
+**Solution:**
+```bash
+# Run backend setup first
+cd infrastructure/Azure/scripts
+./test-backend-setup-locally.sh SIT-test-$(date +%Y%m%d-%H%M)
+
+# Or trigger setup-backend job in workflow
+```
+
+#### Environment Tag Missing
+```
+Error: variable environment_tag is required
+```
+
+**Solution:** Always provide environment_tag in workflow inputs or terraform.tfvars
+
+---
+
+## Prevention Best Practices
+
+### 1. Test Locally First
+```bash
+# Always test scripts locally before GitHub Actions
+cd infrastructure/Azure/scripts
+./test-backend-setup-locally.sh SIT-local-test
+```
+
+### 2. Register Providers Early
+```bash
+# One-time setup per subscription
+./register-azure-providers.sh
+```
+
+### 3. Verify Authentication
+```bash
+# Before any Terraform command
+az account show
+terraform validate
+```
+
+### 4. Use Environment Tags
+```bash
+# Always include environment_tag for isolation
+terraform apply -var="environment_tag=SIT-myname-test"
+```
+
+### 5. Review Plans Carefully
+```bash
+# Always review before apply
+terraform plan -out=tfplan
+terraform show tfplan
+terraform apply tfplan
+```
+
+---
+
+## Emergency Procedures
+
+### 1. Force Unlock State
+```bash
+# Get lock ID from error message
+terraform force-unlock LOCK_ID
+
+# Or wait for auto-unlock (2-5 minutes)
+```
+
+### 2. Reset Backend State
+```bash
+# Backup current state
+az storage blob download \
+  --account-name testcontainerstfstate2745ace7 \
+  --container-name YOUR_CONTAINER \
+  --name terraform.tfstate \
+  --file backup.tfstate \
+  --auth-mode login
+
+# Delete container and recreate
+az storage container delete \
+  --name YOUR_CONTAINER \
+  --account-name testcontainerstfstate2745ace7 \
+  --auth-mode login
+
+# Run backend setup again
+./setup-terraform-backend.sh
+```
+
+### 3. Clean Slate Deployment
+```bash
+# Remove all infrastructure (use with caution!)
+terraform destroy -var="environment_tag=YOUR_TAG"
+
+# Delete resource group
+az group delete --name testcontainers-dev-rg --yes --no-wait
+
+# Recreate from scratch
+terraform apply -var="environment_tag=NEW_TAG"
+```
+
+---
+
+## Support Resources
+
+- **Azure CLI Documentation**: https://docs.microsoft.com/en-us/cli/azure/
+- **Terraform Azure Provider**: https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs
+- **Azure Service Health**: https://status.azure.com/
+- **Provider Registration**: https://aka.ms/rps-not-found
+
+---
+
+## Getting Help
+
+1. Check this troubleshooting guide
+2. Review error messages carefully (they usually contain the solution)
+3. Test locally with detailed logging:
+   ```bash
+   export TF_LOG=DEBUG
+   terraform apply
+   ```
+4. Check Azure Portal for resource state
+5. Review GitHub Actions logs for CI/CD issues
+6. Ask team members or Azure support
+
+---
+
+## Related Documentation
+
+- [LOCAL_TESTING_GUIDE.md](./LOCAL_TESTING_GUIDE.md) - Test infrastructure locally
+- [AUTOMATION_SETUP.md](./AUTOMATION_SETUP.md) - OIDC setup guide
+- [ENVIRONMENT_TAG_GUIDE.md](./ENVIRONMENT_TAG_GUIDE.md) - Environment isolation

@@ -58,15 +58,17 @@ output "nsg_id" {
   value       = module.security.nsg_id
 }
 
-output "github_actions_app_id" {
-  description = "Application (client) ID for GitHub Actions (use this in workflow)"
-  value       = module.oidc.application_id
-}
+# OIDC outputs are commented out since OIDC is managed manually
+# These values are available from the OIDC setup script output
+# output "github_actions_app_id" {
+#   description = "Application (client) ID for GitHub Actions (use this in workflow)"
+#   value       = module.oidc.application_id
+# }
 
-output "github_actions_service_principal_id" {
-  description = "Service Principal Object ID"
-  value       = module.oidc.service_principal_id
-}
+# output "github_actions_service_principal_id" {
+#   description = "Service Principal Object ID"
+#   value       = module.oidc.service_principal_id
+# }
 
 output "subscription_id" {
   description = "Azure Subscription ID"
