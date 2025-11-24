@@ -95,9 +95,22 @@ jobs:
           echo "Running setup script with debug output..."
           bash -x ./scripts/setup-terraform-backend.sh 2>&1 | tee setup_output.log
           
-          # Extract outputs from log
-          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | cut -d'"' -f2)
-          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | cut -d'"' -f2)
+          # Extract outputs from log - strip ANSI color codes and extract values
+          echo "Extracting backend configuration from setup output..."
+          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
+          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
+          
+          echo "Extracted values:"
+          echo "  Resource Group: ${BACKEND_RG}"
+          echo "  Storage Account: ${BACKEND_SA}"
+          
+          # Validate outputs are not empty
+          if [ -z "$BACKEND_RG" ] || [ -z "$BACKEND_SA" ]; then
+            echo "ERROR: Failed to extract backend configuration"
+            echo "Log contents:"
+            cat setup_output.log
+            exit 1
+          fi
           
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
@@ -155,6 +168,18 @@ jobs:
       - name: Update backend configuration
         working-directory: Azure/terraform
         run: |
+          echo "Received backend outputs:"
+          echo "  Resource Group: ${{ needs.setup-backend.outputs.backend_resource_group }}"
+          echo "  Storage Account: ${{ needs.setup-backend.outputs.backend_storage_account }}"
+          
+          # Validate outputs are not empty
+          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+            echo "ERROR: Backend outputs are empty!"
+            echo "Resource Group: '${{ needs.setup-backend.outputs.backend_resource_group }}'"
+            echo "Storage Account: '${{ needs.setup-backend.outputs.backend_storage_account }}'"
+            exit 1
+          fi
+          
           cat > backend.tf <<EOF
           terraform {
             backend "azurerm" {
@@ -195,7 +220,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
-          ARM_USE_AZUREAD_AUTH: true
+          ARM_USE_AZUREAD: true
         run: |
           terraform plan \
             -out=tfplan \
@@ -267,6 +292,18 @@ jobs:
       - name: Update backend configuration
         working-directory: Azure/terraform
         run: |
+          echo "Received backend outputs:"
+          echo "  Resource Group: ${{ needs.setup-backend.outputs.backend_resource_group }}"
+          echo "  Storage Account: ${{ needs.setup-backend.outputs.backend_storage_account }}"
+          
+          # Validate outputs are not empty
+          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
+            echo "ERROR: Backend outputs are empty!"
+            echo "Resource Group: '${{ needs.setup-backend.outputs.backend_resource_group }}'"
+            echo "Storage Account: '${{ needs.setup-backend.outputs.backend_storage_account }}'"
+            exit 1
+          fi
+          
           cat > backend.tf <<EOF
           terraform {
             backend "azurerm" {
@@ -289,7 +326,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
-          ARM_USE_AZUREAD_AUTH: true
+          ARM_USE_AZUREAD: true
 
       - name: Download plan
         uses: actions/download-artifact@v4
@@ -305,7 +342,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
-          ARM_USE_AZUREAD_AUTH: true
+          ARM_USE_AZUREAD: true
         run: |
           terraform apply \
             -auto-approve \
@@ -391,27 +428,28 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
         run: |
           cat > terraform.tfvars <<EOF
-          location      = "${{ env.AZURE_LOCATION }}"
-          project_name  = "testcontainers"
-          environment   = "${{ env.ENVIRONMENT }}"
+          location     = "${{ env.AZURE_LOCATION }}"
+          project_name = "testcontainers"
+          environment  = "${{ env.ENVIRONMENT }}"
           environment_tag = "${{ env.ENVIRONMENT_TAG }}"
           
-          vnet_address_space     = ["10.0.0.0/16"]
-          public_subnet_prefix   = "10.0.1.0/24"
-          private_subnet_prefix  = "10.0.2.0/24"
+          vnet_address_space    = ["10.0.0.0/16"]
+          public_subnet_address_prefix   = ["10.0.1.0/24"]
+          private_subnet_address_prefix  = ["10.0.2.0/24"]
           
-          vm_size = "Standard_D2s_v3"
+          vm_size        = "Standard_D2s_v3"
+          admin_username = "azureuser"
           
           github_repo_url      = "https://github.com/${{ github.repository }}"
           github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
-          github_org                     = "${{ github.repository_owner }}"
-          github_repo                    = "${{ github.event.repository.name }}"
-          terraform_state_resource_group = "${{ needs.setup-backend.outputs.backend_resource_group }}"
-          terraform_state_storage_account = "${{ needs.setup-backend.outputs.backend_storage_account }}"
+          # OIDC Configuration
+          github_org  = "${{ github.repository_owner }}"
+          github_repo = "${{ github.event.repository.name }}"
           EOF
           
           cat > backend.tf <<EOF

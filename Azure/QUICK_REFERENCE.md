@@ -5,9 +5,14 @@
 Error: Either an Access Key / SAS Token or the Resource Group 
 for the Storage Account must be specified - or Azure AD 
 Authentication must be enabled
+
+OR
+
+Error: Failed to get existing workspaces: containers.Client#ListBlobs: 
+Invalid input: `accountName` cannot be an empty string.
 ```
 
-## ✅ The Solution (3 Changes)
+## ✅ The Solution (4 Changes)
 
 ### 1. Backend Setup Script
 **Added RBAC**: Storage Blob Data Contributor + Storage Account Contributor
@@ -17,6 +22,9 @@ Authentication must be enabled
 
 ### 3. Pass ARM_CLIENT_ID
 **Added**: `ARM_CLIENT_ID` to backend setup script environment
+
+### 4. Fix Output Extraction
+**Fixed**: Strip ANSI color codes when extracting backend values from setup script
 
 ## 🔑 Required Environment Variables
 
