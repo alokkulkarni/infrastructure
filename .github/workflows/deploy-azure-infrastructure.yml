@@ -90,13 +90,13 @@ jobs:
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers
           
-          # Run setup script and capture outputs
-          SETUP_OUTPUT=$(./scripts/setup-terraform-backend.sh)
-          echo "$SETUP_OUTPUT"
+          # Run setup script with bash -x for debugging
+          echo "Running setup script with debug output..."
+          bash -x ./scripts/setup-terraform-backend.sh 2>&1 | tee setup_output.log
           
-          # Extract and set outputs for other jobs
-          BACKEND_RG=$(echo "$SETUP_OUTPUT" | grep "export TF_BACKEND_RESOURCE_GROUP" | cut -d'"' -f2)
-          BACKEND_SA=$(echo "$SETUP_OUTPUT" | grep "export TF_BACKEND_STORAGE_ACCOUNT" | cut -d'"' -f2)
+          # Extract outputs from log
+          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | cut -d'"' -f2)
+          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | cut -d'"' -f2)
           
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
