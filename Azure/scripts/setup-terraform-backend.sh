@@ -17,9 +17,11 @@ if [ -z "$AZURE_LOCATION" ]; then
 fi
 
 # Get Azure Subscription ID for unique naming
-AZURE_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+# Try to get from environment first (set by GitHub Actions), then from az account
+AZURE_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id --output tsv 2>/dev/null)}"
 if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
     echo -e "${RED}Error: Unable to retrieve Azure Subscription ID${NC}"
+    echo -e "${RED}Please ensure you are logged in with 'az login' or set ARM_SUBSCRIPTION_ID${NC}"
     exit 1
 fi
 

@@ -58,10 +58,15 @@ jobs:
       - name: Setup Terraform backend
         id: backend
         working-directory: Azure
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           chmod +x scripts/setup-terraform-backend.sh
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers
+          
+          # Ensure subscription is set in this step
+          az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
           # Run setup script and capture outputs
           SETUP_OUTPUT=$(./scripts/setup-terraform-backend.sh)
