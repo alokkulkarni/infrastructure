@@ -106,6 +106,43 @@ az storage account blob-service-properties update \
     --enable-versioning true
 echo -e "${GREEN}✓ Blob versioning enabled${NC}"
 
+# Configure RBAC for OIDC authentication
+if [ -n "$ARM_CLIENT_ID" ]; then
+    echo -e "${YELLOW}Configuring RBAC permissions for OIDC authentication...${NC}"
+    
+    # Get storage account resource ID
+    STORAGE_ACCOUNT_ID=$(az storage account show \
+        --name $STORAGE_ACCOUNT_NAME \
+        --resource-group $RESOURCE_GROUP_NAME \
+        --subscription $AZURE_SUBSCRIPTION_ID \
+        --query id -o tsv)
+    
+    # Assign Storage Blob Data Contributor role to the service principal
+    echo -e "${YELLOW}Assigning Storage Blob Data Contributor role...${NC}"
+    az role assignment create \
+        --assignee $ARM_CLIENT_ID \
+        --role "Storage Blob Data Contributor" \
+        --scope $STORAGE_ACCOUNT_ID \
+        --subscription $AZURE_SUBSCRIPTION_ID \
+        2>/dev/null || echo -e "${YELLOW}Note: Role assignment may already exist${NC}"
+    
+    # Assign Storage Account Contributor role for backend operations
+    echo -e "${YELLOW}Assigning Storage Account Contributor role...${NC}"
+    az role assignment create \
+        --assignee $ARM_CLIENT_ID \
+        --role "Storage Account Contributor" \
+        --scope $STORAGE_ACCOUNT_ID \
+        --subscription $AZURE_SUBSCRIPTION_ID \
+        2>/dev/null || echo -e "${YELLOW}Note: Role assignment may already exist${NC}"
+    
+    echo -e "${GREEN}✓ RBAC permissions configured${NC}"
+    echo -e "${YELLOW}Note: Role assignments may take a few seconds to propagate${NC}"
+    sleep 5
+else
+    echo -e "${YELLOW}Skipping RBAC configuration (ARM_CLIENT_ID not set)${NC}"
+    echo -e "${YELLOW}For OIDC, you'll need to manually assign Storage Blob Data Contributor role${NC}"
+fi
+
 # Check if container exists
 echo -e "${YELLOW}Checking if container exists...${NC}"
 ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP_NAME --account-name $STORAGE_ACCOUNT_NAME --subscription $AZURE_SUBSCRIPTION_ID --query '[0].value' -o tsv)
