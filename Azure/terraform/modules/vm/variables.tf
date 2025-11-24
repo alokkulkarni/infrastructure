@@ -43,8 +43,8 @@ variable "admin_username" {
   type        = string
 }
 
-variable "github_runner_token" {
-  description = "GitHub runner registration token"
+variable "github_pat" {
+  description = "GitHub Personal Access Token for runner registration"
   type        = string
   sensitive   = true
 }

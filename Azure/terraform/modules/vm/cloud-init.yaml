@@ -20,6 +20,81 @@ write_files:
     permissions: '0644'
 
 runcmd:
+  # Install GitHub CLI (gh) - needed for token generation
+  - curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+  - chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  - apt-get update -qq
+  - apt-get install -y gh
+
+  # ==============================================
+  # PRIORITY: Configure GitHub Actions Runner FIRST (before Docker)
+  # ==============================================
+  
+  # Install GitHub Actions Runner
+  - mkdir -p /opt/actions-runner
+  - cd /opt/actions-runner
+  - curl -o actions-runner-linux-x64.tar.gz -L https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz
+  - tar xzf actions-runner-linux-x64.tar.gz
+  - chown -R azureuser:azureuser /opt/actions-runner
+  
+  # Configure and start runner using PAT + gh CLI approach (matches AWS)
+  - |
+    GITHUB_PAT="${github_pat}"
+    GITHUB_REPO_URL="${github_repo_url}"
+    RUNNER_NAME="${github_runner_name}"
+    RUNNER_LABELS="${github_runner_labels}"
+    
+    if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
+      echo "Authenticating GitHub CLI with PAT..."
+      echo "$GITHUB_PAT" | gh auth login --with-token
+      
+      if [ $? -eq 0 ]; then
+        echo "GitHub CLI authenticated successfully"
+        
+        # Extract owner and repo from URL
+        REPO_FULL=$(echo "$GITHUB_REPO_URL" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+        echo "Repository: $REPO_FULL"
+        
+        # Generate runner registration token using gh CLI
+        echo "Generating runner registration token via gh CLI..."
+        RUNNER_TOKEN=$(gh api --method POST "repos/$REPO_FULL/actions/runners/registration-token" --jq '.token' 2>&1)
+        
+        if [ -z "$RUNNER_TOKEN" ] || [ "$RUNNER_TOKEN" == "" ]; then
+          echo "ERROR: Failed to generate runner token"
+        else
+          echo "Runner token generated successfully"
+          
+          # Clear PAT from environment for security
+          unset GITHUB_PAT
+          
+          # Configure runner as azureuser
+          sudo -u azureuser bash -c "cd /opt/actions-runner && ./config.sh --url $GITHUB_REPO_URL --token $RUNNER_TOKEN --name $RUNNER_NAME --labels $RUNNER_LABELS --unattended --replace"
+          
+          if [ $? -eq 0 ]; then
+            echo "Runner configured successfully"
+            
+            # Install and start runner service
+            cd /opt/actions-runner
+            ./svc.sh install azureuser
+            ./svc.sh start
+            
+            echo "Runner service started"
+          else
+            echo "ERROR: Runner configuration failed"
+          fi
+        fi
+      else
+        echo "ERROR: GitHub CLI authentication failed"
+      fi
+    else
+      echo "ERROR: No GitHub PAT provided"
+    fi
+
+  # ==============================================
+  # NOW Install Docker and other services
+  # ==============================================
+
   # Install Docker
   - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
   - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -27,7 +102,26 @@ runcmd:
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   - systemctl enable docker
   - systemctl start docker
+  
+  # Add azureuser to docker group
   - usermod -aG docker azureuser
+  
+  # Restart runner service to pick up docker group membership
+  - |
+    if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
+      cd /opt/actions-runner
+      ./svc.sh stop
+      sleep 2
+      ./svc.sh start
+      sleep 3
+      if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
+        echo "Runner service restarted successfully - can now access Docker"
+      else
+        echo "WARNING: Runner service restart failed"
+      fi
+    else
+      echo "WARNING: Runner service not found"
+    fi
   
   # Create Docker network for services
   - docker network create --driver bridge app-network
@@ -284,30 +378,20 @@ runcmd:
   - systemctl enable nginx-auto-config.service
   - systemctl start nginx-auto-config.service
   
-  # Install GitHub Actions Runner
-  - mkdir -p /opt/actions-runner
-  - cd /opt/actions-runner
-  - curl -o actions-runner-linux-x64.tar.gz -L https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz
-  - tar xzf actions-runner-linux-x64.tar.gz
-  - chown -R azureuser:azureuser /opt/actions-runner
-  
-  # Configure and start runner as azureuser
+  # Setup log rotation for Docker and runner
   - |
-    sudo -u azureuser bash -c "cd /opt/actions-runner && ./config.sh --url ${github_repo_url} --token ${github_runner_token} --name ${github_runner_name} --labels ${github_runner_labels} --unattended --replace"
-  - cd /opt/actions-runner
-  - ./svc.sh install azureuser
+    cat > /etc/logrotate.d/docker <<EOF
+    /var/lib/docker/containers/*/*.log {
+        daily
+        rotate 7
+        compress
+        size=10M
+        missingok
+        delaycompress
+        copytruncate
+    }
+    EOF
   
-  # Add runner user to docker group and restart service
-  - usermod -aG docker azureuser
-  - |
-    if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
-      systemctl restart actions.runner.*.service
-      echo "GitHub Actions runner service restarted with docker group access"
-    fi
-  
-  - ./svc.sh start
-  
-  # Setup log rotation
   - |
     cat > /etc/logrotate.d/github-runner <<EOF
     /opt/actions-runner/_diag/*.log {

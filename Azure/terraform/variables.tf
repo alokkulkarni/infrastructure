@@ -51,8 +51,8 @@ variable "admin_username" {
   default     = "azureuser"
 }
 
-variable "github_runner_token" {
-  description = "GitHub runner registration token (generated dynamically)"
+variable "github_pat" {
+  description = "GitHub Personal Access Token for runner registration (generates token via gh CLI)"
   type        = string
   sensitive   = true
   default     = ""

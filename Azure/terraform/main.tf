@@ -93,7 +93,7 @@ module "vm" {
   vm_size             = var.vm_size
   admin_username      = var.admin_username
 
-  github_runner_token  = var.github_runner_token
+  github_pat           = var.github_pat
   github_repo_url      = var.github_repo_url
   github_runner_name   = var.github_runner_name
   github_runner_labels = var.github_runner_labels

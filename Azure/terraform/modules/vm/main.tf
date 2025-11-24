@@ -96,7 +96,7 @@ resource "azurerm_linux_virtual_machine" "main" {
   }
 
   custom_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {
-    github_runner_token  = var.github_runner_token
+    github_pat           = var.github_pat
     github_repo_url      = var.github_repo_url
     github_runner_name   = var.github_runner_name
     github_runner_labels = join(",", var.github_runner_labels)
