@@ -80,9 +80,13 @@ jobs:
           echo "Verifying Azure CLI authentication..."
           az account show --query "{name:name, id:id}" -o json
           
+          # Sanitize subscription ID (remove any whitespace/newlines)
+          CLEAN_SUB_ID=$(echo "$ARM_SUBSCRIPTION_ID" | tr -d '[:space:]')
+          echo "Cleaned subscription ID length: ${#CLEAN_SUB_ID}"
+          
           # Ensure the correct subscription is set
           echo "Setting subscription context..."
-          az account set --subscription $ARM_SUBSCRIPTION_ID
+          az account set --subscription "$CLEAN_SUB_ID"
           
           echo "✓ Subscription context set"
           
@@ -90,6 +94,7 @@ jobs:
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers
           export ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}
+          export ARM_SUBSCRIPTION_ID="$CLEAN_SUB_ID"
           
           # Run setup script with bash -x for debugging
           echo "Running setup script with debug output..."

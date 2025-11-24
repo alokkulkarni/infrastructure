@@ -33,7 +33,8 @@ fi
 # Get Azure Subscription ID for unique naming
 # Try to get from environment first (set by GitHub Actions), then from az account
 if [ -n "$ARM_SUBSCRIPTION_ID" ]; then
-    AZURE_SUBSCRIPTION_ID="$ARM_SUBSCRIPTION_ID"
+    # Trim whitespace and newlines from the subscription ID
+    AZURE_SUBSCRIPTION_ID=$(echo "$ARM_SUBSCRIPTION_ID" | tr -d '[:space:]')
     echo -e "${GREEN}Using subscription from ARM_SUBSCRIPTION_ID environment variable${NC}"
 else
     AZURE_SUBSCRIPTION_ID=$(az account show --query id --output tsv 2>/dev/null)
