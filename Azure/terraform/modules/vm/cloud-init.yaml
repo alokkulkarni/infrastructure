@@ -11,175 +11,12 @@ packages:
   - software-properties-common
   - jq
   - unzip
+  - nginx
 
 write_files:
-  - path: /opt/nginx/default.conf
+  - path: /opt/setup-complete.flag
     content: |
-      server {
-          listen 80 default_server;
-          server_name _;
-          
-          # Health check endpoint
-          location /health {
-              access_log off;
-              return 200 "healthy\n";
-              add_header Content-Type text/plain;
-          }
-          
-          # Default response
-          location / {
-              return 200 "Nginx reverse proxy is running. Configure services in /opt/nginx/conf.d/\n";
-              add_header Content-Type text/plain;
-          }
-      }
-    permissions: '0644'
-  
-  - path: /opt/nginx/README.md
-    content: |
-      # Nginx Reverse Proxy Configuration
-      
-      This Nginx instance runs as a Docker container and acts as a reverse proxy
-      for applications deployed on the docker network with **automatic configuration**.
-      
-      ## Network Architecture
-      
-      - Public Internet → VM Public IP → Nginx Container (ports 80/443)
-      - Nginx → Docker Network (app-network) → Application Containers
-      
-      ## Automated Configuration (Recommended)
-      
-      **Containers deployed to app-network are automatically configured!**
-      
-      Simply deploy your container with Docker labels:
-      
-      ```bash
-      docker run -d \
-        --name my-app \
-        --network app-network \
-        --label nginx.enable=true \
-        --label nginx.host=myapp.example.com \
-        --label nginx.path=/api \
-        --label nginx.port=8080 \
-        my-app:latest
-      ```
-      
-      **Supported Labels:**
-      - `nginx.enable` - Enable/disable auto-config (default: true)
-      - `nginx.host` - Server name for host-based routing (optional)
-      - `nginx.path` - URL path prefix (default: /container-name)
-      - `nginx.port` - Backend port (auto-detected if not specified)
-      
-      **Example: Path-based routing**
-      ```bash
-      docker run -d \
-        --name payment-api \
-        --network app-network \
-        --label nginx.path=/payments \
-        --label nginx.port=8080 \
-        payment-service:latest
-      ```
-      Access at: `http://VM_IP/payments`
-      
-      **Example: Host-based routing**
-      ```bash
-      docker run -d \
-        --name web-app \
-        --network app-network \
-        --label nginx.host=app.example.com \
-        web-app:latest
-      ```
-      Access at: `http://app.example.com`
-      
-      **Auto-configuration features:**
-      - ✅ Watches Docker events (container start/stop)
-      - ✅ Generates Nginx configs automatically
-      - ✅ Reloads Nginx seamlessly
-      - ✅ Cleans up configs when containers stop
-      - ✅ Logs to `/var/log/nginx-auto-config.log`
-      
-      ## Manual Configuration (Advanced)
-      
-      For complex scenarios, create custom configs in `/opt/nginx/conf.d/`:
-      
-      **Example: Custom upstream with health checks**
-      ```nginx
-      upstream backend_cluster {
-          server backend1:8080 max_fails=3 fail_timeout=30s;
-          server backend2:8080 max_fails=3 fail_timeout=30s;
-          server backend3:8080 backup;
-      }
-      
-      server {
-          listen 80;
-          server_name app.example.com;
-          
-          location / {
-              proxy_pass http://backend_cluster;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_next_upstream error timeout http_502 http_503;
-          }
-      }
-      ```
-      
-      **Reload after manual changes:**
-      ```bash
-      docker exec nginx nginx -t  # Test config
-      docker exec nginx nginx -s reload
-      ```
-      
-      ## Using Docker Compose
-      
-      Deploy services with labels for auto-configuration:
-      
-      ```yaml
-      version: '3.8'
-      
-      services:
-        backend:
-          image: my-backend:latest
-          networks:
-            - app-network
-          labels:
-            nginx.enable: "true"
-            nginx.path: "/api"
-            nginx.port: "8080"
-        
-        frontend:
-          image: my-frontend:latest
-          networks:
-            - app-network
-          labels:
-            nginx.enable: "true"
-            nginx.host: "app.example.com"
-            nginx.port: "3000"
-      
-      networks:
-        app-network:
-          external: true
-      ```
-      
-      Deploy: `docker compose up -d`
-      
-      Configs are automatically generated and Nginx reloaded!
-      
-      ## Monitoring
-      
-      **View auto-config logs:**
-      ```bash
-      tail -f /var/log/nginx-auto-config.log
-      ```
-      
-      **View Nginx logs:**
-      ```bash
-      docker logs nginx
-      docker logs -f nginx  # Follow logs
-      ```
-      
-      ## Test Configuration
-      ```bash
-      docker exec nginx nginx -t
-      ```
+      Setup initiated at $(date)
     permissions: '0644'
 
 runcmd:
@@ -195,99 +32,254 @@ runcmd:
   # Create Docker network for services
   - docker network create --driver bridge app-network
   
-  # Create Nginx config directory
-  - mkdir -p /opt/nginx/conf.d /opt/nginx/conf.d/auto-generated
+  # Configure Native Nginx
+  - mkdir -p /etc/nginx/conf.d/auto-generated
+  - mkdir -p /var/log/nginx
+  - touch /etc/nginx/conf.d/auto-generated/upstreams.conf
+  - touch /etc/nginx/conf.d/auto-generated/locations.conf
   
-  # Deploy automated Nginx configuration manager script
+  # Create main Nginx configuration
   - |
-    cat > /opt/nginx/auto-config.sh <<'AUTOCONFIG'
+    cat > /etc/nginx/nginx.conf <<'EOF'
+    user www-data;
+    worker_processes auto;
+    pid /run/nginx.pid;
+    error_log /var/log/nginx/error.log;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+
+        sendfile on;
+        tcp_nopush on;
+        keepalive_timeout 65;
+        gzip on;
+
+        # Default server
+        server {
+            listen 80 default_server;
+            server_name _;
+
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "Nginx reverse proxy is running\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Include auto-generated container locations
+            include /etc/nginx/conf.d/auto-generated/locations.conf;
+
+            # Default response
+            location / {
+                return 200 "Nginx is running. Application routes will be auto-configured.\n";
+                add_header Content-Type text/plain;
+            }
+        }
+
+        # Include upstreams
+        include /etc/nginx/conf.d/auto-generated/upstreams.conf;
+    }
+    EOF
+  
+  - systemctl enable nginx
+  - systemctl start nginx
+  
+  # Create automated Nginx configuration manager script
+  - |
+    cat > /usr/local/bin/nginx-auto-config.sh <<'AUTOCONFIG'
     #!/bin/bash
-    # Automated Nginx Configuration Manager
+    # Automated Nginx Configuration Manager for Native Nginx
     LOG_FILE="/var/log/nginx-auto-config.log"
-    CONFIG_DIR="/opt/nginx/conf.d"
-    GENERATED_DIR="$CONFIG_DIR/auto-generated"
-    mkdir -p $GENERATED_DIR
-    log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE; }
-    generate_config() {
+    CONFIG_DIR="/etc/nginx/conf.d/auto-generated"
+    mkdir -p $CONFIG_DIR
+
+    log() {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
+    }
+
+    # Collect container info and store in temp file
+    collect_container_info() {
         local container_id=$1
         local container_name=$(docker inspect --format='{{.Name}}' $container_id | sed 's/^\///')
-        local network=$(docker inspect --format='{{range $key, $value := .NetworkSettings.Networks}}{{$key}}{{end}}' $container_id)
-        [ "$network" != "app-network" ] && return
-        local port=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}{{end}}' $container_id | cut -d'/' -f1 | head -n1)
+        
+        # Get container IP from app-network using jq for reliability
+        local container_ip=$(docker inspect $container_id | jq -r '.[0].NetworkSettings.Networks["app-network"].IPAddress // empty' 2>/dev/null)
+        
+        if [ -z "$container_ip" ]; then
+            log "Container $container_name not on app-network, skipping"
+            return
+        fi
+        
+        # Get labels
         local nginx_enable=$(docker inspect --format='{{index .Config.Labels "nginx.enable"}}' $container_id)
-        local nginx_host=$(docker inspect --format='{{index .Config.Labels "nginx.host"}}' $container_id)
         local nginx_path=$(docker inspect --format='{{index .Config.Labels "nginx.path"}}' $container_id)
         local nginx_port=$(docker inspect --format='{{index .Config.Labels "nginx.port"}}' $container_id)
-        [ -n "$nginx_port" ] && [ "$nginx_port" != "<no value>" ] && port=$nginx_port
-        [ "$nginx_enable" == "false" ] && return
-        [ -z "$nginx_path" ] || [ "$nginx_path" == "<no value>" ] && nginx_path="/$container_name"
-        local config_file="$GENERATED_DIR/$${container_name}.conf"
-        log "Generating config for $container_name (port: $port, path: $nginx_path)"
-        cat > $config_file <<NGINXCONF
-    upstream $${container_name}_backend { server $${container_name}:$${port}; }
-    server {
-        listen 80;
-    NGINXCONF
-        [ -n "$nginx_host" ] && [ "$nginx_host" != "<no value>" ] && echo "    server_name $nginx_host;" >> $config_file
-        cat >> $config_file <<NGINXCONF
-        location $nginx_path {
-            proxy_pass http://$${container_name}_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
-        }
+        
+        # Skip if disabled
+        if [ "$nginx_enable" == "false" ]; then
+            log "Container $container_name has nginx.enable=false, skipping"
+            return
+        fi
+        
+        # Require nginx.path label
+        if [ -z "$nginx_path" ] || [ "$nginx_path" == "<no value>" ]; then
+            log "No nginx.path label for $container_name, skipping"
+            return
+        fi
+        
+        # Get internal container port (not host port)
+        if [ -z "$nginx_port" ] || [ "$nginx_port" == "<no value>" ]; then
+            # Auto-detect internal port from exposed ports
+            nginx_port=$(docker inspect --format='{{range $key, $value := .Config.ExposedPorts}}{{$key}}{{end}}' $container_id | cut -d'/' -f1 | head -n1)
+        fi
+        
+        if [ -z "$nginx_port" ]; then
+            log "Could not determine port for $container_name, skipping"
+            return
+        fi
+        
+        log "Found container: $container_name at $container_ip:$nginx_port path $nginx_path"
+        
+        # Store info in temp file
+        echo "$container_name|$container_ip|$nginx_port|$nginx_path" >> /tmp/nginx-containers.tmp
     }
-    NGINXCONF
-        docker exec nginx nginx -t && docker exec nginx nginx -s reload
+
+    # Generate consolidated nginx config from all collected containers
+    generate_consolidated_config() {
+        local temp_file="/tmp/nginx-containers.tmp"
+        
+        if [ ! -f "$temp_file" ] || [ ! -s "$temp_file" ]; then
+            log "No containers to configure"
+            return
+        fi
+        
+        log "Generating consolidated nginx configuration..."
+        
+        # Generate upstreams file
+        local upstream_file="$CONFIG_DIR/upstreams.conf"
+        echo "# Auto-generated upstreams - $(date)" > $upstream_file
+        
+        while IFS='|' read -r name ip port path; do
+            cat >> $upstream_file <<UPSTREAM
+    upstream $${name}_backend {
+        server $${ip}:$${port};
+        keepalive 32;
     }
-    remove_config() { local config_file="$GENERATED_DIR/$1.conf"; [ -f $config_file ] && rm -f $config_file && docker exec nginx nginx -s reload; }
-    log "Scanning existing containers..."; docker ps --filter "network=app-network" --format '{{.ID}}' | while read cid; do generate_config $cid; done
-    log "Starting Docker events monitor..."; docker events --filter 'type=container' --filter 'event=start' --filter 'event=die' --format '{{json .}}' | while read event; do
-        evt=$(echo $event | jq -r '.status'); cid=$(echo $event | jq -r '.id'); cname=$(echo $event | jq -r '.Actor.Attributes.name')
-        [ "$evt" == "start" ] && (sleep 2; generate_config $cid) || remove_config $cname
+    UPSTREAM
+        done < $temp_file
+        
+        # Generate locations file
+        local locations_file="$CONFIG_DIR/locations.conf"
+        echo "# Auto-generated locations - $(date)" > $locations_file
+        echo "# These locations are included in the main server block" >> $locations_file
+        
+        while IFS='|' read -r name ip port path; do
+            # Add trailing slash to path for proper matching
+            local path_prefix="$path"
+            [ "$path" != "/" ] && path_prefix="$${path}/"
+            
+            cat >> $locations_file <<LOCATION
+
+    location $path_prefix {
+        rewrite ^$path/(.*) /\$1 break;
+        proxy_pass http://$${name}_backend;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    LOCATION
+        done < $temp_file
+        
+        # Test and reload
+        log "Testing nginx configuration..."
+        if nginx -t 2>&1 | tee -a $LOG_FILE; then
+            systemctl reload nginx 2>&1 | tee -a $LOG_FILE
+            log "✅ Consolidated config created and loaded"
+            log "   Upstreams: $upstream_file"
+            log "   Locations: $locations_file"
+        else
+            log "❌ Nginx config test failed!"
+            rm -f $upstream_file $locations_file
+        fi
+        
+        # Cleanup temp file
+        rm -f $temp_file
+    }
+
+    rebuild_all_configs() {
+        log "Rebuilding all container configurations..."
+        
+        # Clear temp file
+        rm -f /tmp/nginx-containers.tmp
+        
+        # Collect all containers on app-network
+        docker ps --filter "network=app-network" --format '{{.ID}}' | while read cid; do
+            collect_container_info $cid
+        done
+        
+        # Generate consolidated config
+        generate_consolidated_config
+    }
+
+    # Initialize with existing containers
+    log "Initializing: scanning existing containers on app-network..."
+    rebuild_all_configs
+
+    # Monitor Docker events
+    log "Monitoring Docker events..."
+    docker events --filter 'type=container' --filter 'event=start' --filter 'event=die' --format '{{json .}}' | while read event; do
+        event_type=$(echo $event | jq -r '.status')
+        container_name=$(echo $event | jq -r '.Actor.Attributes.name')
+        
+        log "Event: $event_type for $container_name"
+        
+        # Always rebuild all configs on any container change
+        # This ensures consistency and handles multi-container scenarios
+        sleep 2  # Brief delay to ensure container is fully started/stopped
+        rebuild_all_configs
     done
     AUTOCONFIG
-  - chmod +x /opt/nginx/auto-config.sh
+  
+  - chmod +x /usr/local/bin/nginx-auto-config.sh
   
   # Create systemd service for auto-config
   - |
     cat > /etc/systemd/system/nginx-auto-config.service <<'SYSTEMD'
     [Unit]
     Description=Nginx Auto Configuration Manager
-    After=docker.service
-    Requires=docker.service
+    After=docker.service nginx.service
+    Requires=docker.service nginx.service
+    
     [Service]
     Type=simple
     User=root
-    ExecStart=/opt/nginx/auto-config.sh
+    ExecStart=/usr/local/bin/nginx-auto-config.sh
     Restart=always
     RestartSec=10
     StandardOutput=append:/var/log/nginx-auto-config.log
     StandardError=append:/var/log/nginx-auto-config.log
+    
     [Install]
     WantedBy=multi-user.target
     SYSTEMD
   
-  # Run Nginx as Docker container
-  - |
-    docker run -d \
-      --name nginx \
-      --network app-network \
-      -p 80:80 \
-      -p 443:443 \
-      -v /opt/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro \
-      -v /opt/nginx/conf.d:/etc/nginx/conf.d/services:ro \
-      --restart unless-stopped \
-      nginx:alpine
-  
-  # Start the automated configuration service
   - systemctl daemon-reload
   - systemctl enable nginx-auto-config.service
   - systemctl start nginx-auto-config.service
@@ -304,6 +296,15 @@ runcmd:
     sudo -u azureuser bash -c "cd /opt/actions-runner && ./config.sh --url ${github_repo_url} --token ${github_runner_token} --name ${github_runner_name} --labels ${github_runner_labels} --unattended --replace"
   - cd /opt/actions-runner
   - ./svc.sh install azureuser
+  
+  # Add runner user to docker group and restart service
+  - usermod -aG docker azureuser
+  - |
+    if systemctl is-active --quiet actions.runner.* 2>/dev/null; then
+      systemctl restart actions.runner.*.service
+      echo "GitHub Actions runner service restarted with docker group access"
+    fi
+  
   - ./svc.sh start
   
   # Setup log rotation

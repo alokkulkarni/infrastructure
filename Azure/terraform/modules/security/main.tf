@@ -1,6 +1,6 @@
 /**
  * Azure Network Security Group Module
- * 
+ *
  * Creates NSG with secure rules (no SSH access)
  */
 
