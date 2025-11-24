@@ -73,7 +73,25 @@ jobs:
         working-directory: Azure
         env:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
+          # Verify Azure CLI session is active
+          echo "Verifying Azure CLI authentication..."
+          az account show --query "{name:name, id:id}" -o json
+          
+          # Ensure the correct subscription is set
+          echo "Setting subscription context..."
+          az account set --subscription $ARM_SUBSCRIPTION_ID
+          
+          # Verify subscription is set correctly
+          CURRENT_SUB=$(az account show --query id -o tsv)
+          if [ "$CURRENT_SUB" != "$ARM_SUBSCRIPTION_ID" ]; then
+            echo "ERROR: Failed to set subscription. Current: $CURRENT_SUB, Expected: $ARM_SUBSCRIPTION_ID"
+            exit 1
+          fi
+          echo "✓ Subscription set correctly: $CURRENT_SUB"
+          
           chmod +x scripts/setup-terraform-backend.sh
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers

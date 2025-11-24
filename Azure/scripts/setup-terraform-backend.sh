@@ -49,6 +49,18 @@ echo ""
 
 # Check if resource group exists
 echo -e "${YELLOW}Checking if resource group exists...${NC}"
+echo "DEBUG: About to check resource group with subscription: $AZURE_SUBSCRIPTION_ID"
+echo "DEBUG: Testing subscription access first..."
+if ! az account show --subscription $AZURE_SUBSCRIPTION_ID &> /dev/null; then
+    echo -e "${RED}ERROR: Cannot access subscription $AZURE_SUBSCRIPTION_ID${NC}"
+    echo "Available subscriptions:"
+    az account list --query "[].{name:name, id:id}" -o table
+    echo "Current subscription:"
+    az account show --query "{name:name, id:id}" -o json
+    exit 1
+fi
+echo "DEBUG: Subscription access confirmed"
+
 if az group show --name $RESOURCE_GROUP_NAME --subscription $AZURE_SUBSCRIPTION_ID &> /dev/null; then
     echo -e "${GREEN}✓ Resource group already exists, reusing existing resource group${NC}"
 else
