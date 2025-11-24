@@ -50,7 +50,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set Azure Subscription
+      - name: Set Azure Subscription and Verify Access
         run: |
           echo "Available subscriptions:"
           az account list --query "[].{name:name, id:id, state:state}" -o table
@@ -60,6 +60,13 @@ jobs:
           echo ""
           echo "Current subscription:"
           az account show
+          echo ""
+          echo "Testing access by listing resource groups:"
+          az group list --query "[].name" -o tsv || echo "Failed to list resource groups"
+          echo ""
+          echo "Verifying role assignments:"
+          APP_ID="${{ secrets.AZURE_CLIENT_ID }}"
+          az role assignment list --assignee "$APP_ID" --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --output table || echo "Failed to list role assignments"
 
       - name: Setup Terraform backend
         id: backend
