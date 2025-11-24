@@ -254,7 +254,7 @@ echo "  container_name       = \"$CONTAINER_NAME\""
 echo "  key                  = \"terraform.tfstate\""
 echo ""
 
-# Export for GitHub Actions workflow consumption
-echo "export TF_BACKEND_RESOURCE_GROUP=\"$RESOURCE_GROUP_NAME\""
-echo "export TF_BACKEND_STORAGE_ACCOUNT=\"$STORAGE_ACCOUNT_NAME\""
-echo "export TF_BACKEND_CONTAINER=\"$CONTAINER_NAME\""
+# Export for GitHub Actions workflow consumption (no quotes for easier parsing)
+echo "export TF_BACKEND_RESOURCE_GROUP=$RESOURCE_GROUP_NAME"
+echo "export TF_BACKEND_STORAGE_ACCOUNT=$STORAGE_ACCOUNT_NAME"
+echo "export TF_BACKEND_CONTAINER=$CONTAINER_NAME"

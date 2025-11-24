@@ -91,9 +91,9 @@ jobs:
           
           # Extract outputs from log - strip ANSI color codes and extract values
           echo "Extracting backend configuration from setup output..."
-          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
-          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
-          BACKEND_CONTAINER=$(grep "export TF_BACKEND_CONTAINER" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | sed 's/.*="\(.*\)"/\1/')
+          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
+          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
+          BACKEND_CONTAINER=$(grep "export TF_BACKEND_CONTAINER" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
           
           echo "Extracted values:"
           echo "  Resource Group: ${BACKEND_RG}"
