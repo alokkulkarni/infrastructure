@@ -67,7 +67,9 @@ echo ""
 
 # Get subscription ID from current context
 AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-echo -e "${GREEN}Subscription ID: $AZURE_SUBSCRIPTION_ID${NC}"
+AZURE_SUBSCRIPTION_NAME=$(az account show --query name -o tsv)
+echo -e "${GREEN}Subscription: $AZURE_SUBSCRIPTION_NAME${NC}"
+echo -e "${YELLOW}Subscription ID: ${AZURE_SUBSCRIPTION_ID:0:8}...${NC}"  # Show only first 8 chars
 echo ""
 
 # Ask for confirmation
