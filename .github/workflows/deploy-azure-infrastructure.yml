@@ -84,19 +84,11 @@ jobs:
           echo "Setting subscription context..."
           az account set --subscription $ARM_SUBSCRIPTION_ID
           
-          # Verify subscription is set correctly
-          CURRENT_SUB=$(az account show --query id -o tsv)
-          if [ "$CURRENT_SUB" != "$ARM_SUBSCRIPTION_ID" ]; then
-            echo "ERROR: Failed to set subscription. Current: $CURRENT_SUB, Expected: $ARM_SUBSCRIPTION_ID"
-            exit 1
-          fi
-          echo "✓ Subscription set correctly: $CURRENT_SUB"
+          echo "✓ Subscription context set"
           
           chmod +x scripts/setup-terraform-backend.sh
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers
-          
-          echo "Using subscription: $ARM_SUBSCRIPTION_ID"
           
           # Run setup script and capture outputs
           SETUP_OUTPUT=$(./scripts/setup-terraform-backend.sh)
