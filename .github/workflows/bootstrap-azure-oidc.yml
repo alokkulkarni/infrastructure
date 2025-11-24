@@ -1,0 +1,219 @@
+name: Bootstrap Azure OIDC (One-Time Setup)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to bootstrap'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  PROJECT_NAME: 'testcontainers'
+
+jobs:
+  bootstrap-oidc:
+    name: Bootstrap OIDC Resources
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login with Service Principal
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Bootstrap OIDC Resources
+        id: bootstrap
+        run: |
+          set -e
+          
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          GITHUB_ORG="${{ github.repository_owner }}"
+          GITHUB_REPO="${{ github.event.repository.name }}"
+          
+          # Get subscription details
+          SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+          TENANT_ID=$(az account show --query tenantId -o tsv)
+          
+          echo "🚀 Bootstrapping OIDC for:"
+          echo "  Organization: $GITHUB_ORG"
+          echo "  Repository: $GITHUB_REPO"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Subscription: $SUBSCRIPTION_ID"
+          echo "  Tenant: $TENANT_ID"
+          echo ""
+          
+          # Application name
+          APP_NAME="${PROJECT_NAME}-${ENVIRONMENT}-github-actions"
+          
+          # Check if application exists
+          echo "Checking if Azure AD Application exists..."
+          APP_ID=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)
+          
+          if [ -z "$APP_ID" ] || [ "$APP_ID" = "null" ]; then
+            echo "Creating Azure AD Application: $APP_NAME"
+            APP_ID=$(az ad app create \
+              --display-name "$APP_NAME" \
+              --query appId -o tsv)
+            echo "✓ Created application: $APP_ID"
+          else
+            echo "✓ Application already exists: $APP_ID"
+          fi
+          
+          # Get object ID
+          APP_OBJECT_ID=$(az ad app show --id "$APP_ID" --query id -o tsv)
+          
+          # Check if service principal exists
+          echo "Checking if Service Principal exists..."
+          SP_ID=$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)
+          
+          if [ -z "$SP_ID" ] || [ "$SP_ID" = "null" ]; then
+            echo "Creating Service Principal..."
+            SP_ID=$(az ad sp create --id "$APP_ID" --query id -o tsv)
+            echo "✓ Created service principal: $SP_ID"
+            sleep 10  # Wait for SP to propagate
+          else
+            echo "✓ Service Principal already exists: $SP_ID"
+          fi
+          
+          # Function to create or update federated credential
+          create_federated_credential() {
+            local cred_name=$1
+            local subject=$2
+            local description=$3
+            
+            echo "Checking federated credential: $cred_name"
+            
+            # Check if credential exists
+            EXISTING_CRED=$(az ad app federated-credential list \
+              --id "$APP_OBJECT_ID" \
+              --query "[?name=='$cred_name'].name" -o tsv)
+            
+            if [ -z "$EXISTING_CRED" ]; then
+              echo "Creating federated credential: $cred_name"
+              az ad app federated-credential create \
+                --id "$APP_OBJECT_ID" \
+                --parameters "{
+                  \"name\": \"$cred_name\",
+                  \"issuer\": \"https://token.actions.githubusercontent.com\",
+                  \"subject\": \"$subject\",
+                  \"audiences\": [\"api://AzureADTokenExchange\"],
+                  \"description\": \"$description\"
+                }"
+              echo "✓ Created credential: $cred_name"
+            else
+              echo "✓ Credential already exists: $cred_name"
+            fi
+          }
+          
+          # Create three federated credentials
+          echo ""
+          echo "Creating federated credentials..."
+          
+          create_federated_credential \
+            "github-main" \
+            "repo:${GITHUB_ORG}/${GITHUB_REPO}:ref:refs/heads/main" \
+            "GitHub Actions - Main Branch"
+          
+          create_federated_credential \
+            "github-pr" \
+            "repo:${GITHUB_ORG}/${GITHUB_REPO}:pull_request" \
+            "GitHub Actions - Pull Requests"
+          
+          create_federated_credential \
+            "github-environment" \
+            "repo:${GITHUB_ORG}/${GITHUB_REPO}:environment:${ENVIRONMENT}" \
+            "GitHub Actions - Environment: ${ENVIRONMENT}"
+          
+          # Assign roles
+          echo ""
+          echo "Assigning roles..."
+          
+          assign_role() {
+            local role=$1
+            echo "Checking role: $role"
+            
+            EXISTING_ROLE=$(az role assignment list \
+              --assignee "$APP_ID" \
+              --role "$role" \
+              --scope "/subscriptions/$SUBSCRIPTION_ID" \
+              --query "[0].roleDefinitionName" -o tsv)
+            
+            if [ -z "$EXISTING_ROLE" ]; then
+              echo "Assigning role: $role"
+              az role assignment create \
+                --assignee "$APP_ID" \
+                --role "$role" \
+                --scope "/subscriptions/$SUBSCRIPTION_ID"
+              echo "✓ Assigned role: $role"
+            else
+              echo "✓ Role already assigned: $role"
+            fi
+          }
+          
+          assign_role "Contributor"
+          assign_role "User Access Administrator"
+          
+          # Output results
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "✓ OIDC Bootstrap Complete!"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+          echo "GitHub Secrets Configuration:"
+          echo ""
+          echo "Go to: https://github.com/${GITHUB_ORG}/${GITHUB_REPO}/settings/secrets/actions"
+          echo ""
+          echo "Add or update these secrets:"
+          echo ""
+          echo "AZURE_CLIENT_ID:"
+          echo "$APP_ID"
+          echo ""
+          echo "AZURE_TENANT_ID:"
+          echo "$TENANT_ID"
+          echo ""
+          echo "AZURE_SUBSCRIPTION_ID:"
+          echo "$SUBSCRIPTION_ID"
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+          echo "Next steps:"
+          echo "1. Add the above secrets to GitHub (if not already present)"
+          echo "2. Run the 'Deploy Azure Infrastructure (OIDC)' workflow"
+          echo "3. Terraform will now authenticate using OIDC"
+          echo ""
+          
+          # Set outputs for potential automation
+          echo "client_id=$APP_ID" >> $GITHUB_OUTPUT
+          echo "tenant_id=$TENANT_ID" >> $GITHUB_OUTPUT
+          echo "subscription_id=$SUBSCRIPTION_ID" >> $GITHUB_OUTPUT
+
+      - name: Display Summary
+        run: |
+          echo "## ✓ OIDC Bootstrap Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### GitHub Secrets Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Add these secrets to your repository:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`AZURE_CLIENT_ID\`: ${{ steps.bootstrap.outputs.client_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- \`AZURE_TENANT_ID\`: ${{ steps.bootstrap.outputs.tenant_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- \`AZURE_SUBSCRIPTION_ID\`: ${{ steps.bootstrap.outputs.subscription_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to [Repository Secrets](https://github.com/${{ github.repository }}/settings/secrets/actions)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Add the above secrets (copy the IDs exactly, no trailing newlines)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Run the **Deploy Azure Infrastructure (OIDC)** workflow" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** This bootstrap only needs to run once per environment." >> $GITHUB_STEP_SUMMARY
