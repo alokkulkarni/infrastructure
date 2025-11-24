@@ -56,6 +56,157 @@ jobs:
           # Application name
           APP_NAME="${PROJECT_NAME}-${ENVIRONMENT}-github-actions"
           
+          # Function to validate federated credential
+          validate_federated_credential() {
+            local app_object_id=$1
+            local cred_name=$2
+            local expected_subject=$3
+            
+            # Get credential details
+            local cred_subject=$(az ad app federated-credential list \
+              --id "$app_object_id" \
+              --query "[?name=='$cred_name'].subject" -o tsv)
+            
+            if [ "$cred_subject" = "$expected_subject" ]; then
+              return 0  # Valid
+            else
+              return 1  # Invalid or missing
+            fi
+          }
+          
+          # Function to delete federated credential
+          delete_federated_credential() {
+            local app_object_id=$1
+            local cred_name=$2
+            
+            echo "  Deleting invalid credential: $cred_name"
+            az ad app federated-credential delete \
+              --id "$app_object_id" \
+              --federated-credential-id "$cred_name" \
+              --yes 2>/dev/null || true
+          }
+          
+          # Function to create or update federated credential with validation
+          create_or_update_federated_credential() {
+            local cred_name=$1
+            local subject=$2
+            local description=$3
+            local app_object_id=$4
+            
+            echo "Validating federated credential: $cred_name"
+            
+            # Check if credential exists
+            EXISTING_CRED=$(az ad app federated-credential list \
+              --id "$app_object_id" \
+              --query "[?name=='$cred_name'].name" -o tsv)
+            
+            if [ -n "$EXISTING_CRED" ]; then
+              # Credential exists - validate it
+              if validate_federated_credential "$app_object_id" "$cred_name" "$subject"; then
+                echo "✓ Credential is valid: $cred_name"
+                return 0
+              else
+                echo "⚠ Credential exists but is invalid: $cred_name"
+                delete_federated_credential "$app_object_id" "$cred_name"
+              fi
+            fi
+            
+            # Create credential (either new or replacement)
+            echo "Creating federated credential: $cred_name"
+            az ad app federated-credential create \
+              --id "$app_object_id" \
+              --parameters "{
+                \"name\": \"$cred_name\",
+                \"issuer\": \"https://token.actions.githubusercontent.com\",
+                \"subject\": \"$subject\",
+                \"audiences\": [\"api://AzureADTokenExchange\"],
+                \"description\": \"$description\"
+              }"
+            echo "✓ Created credential: $cred_name"
+          }
+          
+          # Function to validate role assignment
+          validate_role_assignment() {
+            local app_id=$1
+            local role=$2
+            local subscription_id=$3
+            
+            local existing_scope=$(az role assignment list \
+              --assignee "$app_id" \
+              --role "$role" \
+              --query "[0].scope" -o tsv)
+            
+            local expected_scope="/subscriptions/$subscription_id"
+            
+            if [ "$existing_scope" = "$expected_scope" ]; then
+              return 0  # Valid
+            else
+              return 1  # Invalid or missing
+            fi
+          }
+          
+          # Function to clean up invalid role assignments
+          cleanup_invalid_roles() {
+            local app_id=$1
+            local role=$2
+            local subscription_id=$3
+            
+            echo "  Cleaning up invalid role assignments for: $role"
+            
+            # Get all assignments for this role
+            local assignments=$(az role assignment list \
+              --assignee "$app_id" \
+              --role "$role" \
+              --query "[].id" -o tsv)
+            
+            # Delete assignments not at subscription scope
+            for assignment_id in $assignments; do
+              if [[ ! "$assignment_id" =~ "/subscriptions/$subscription_id/providers/Microsoft.Authorization" ]]; then
+                continue
+              fi
+              local scope=$(az role assignment list --query "[?id=='$assignment_id'].scope" -o tsv)
+              if [ "$scope" != "/subscriptions/$subscription_id" ]; then
+                echo "    Removing assignment at incorrect scope: $scope"
+                az role assignment delete --ids "$assignment_id" 2>/dev/null || true
+              fi
+            done
+          }
+          
+          # Function to assign role with validation
+          assign_role_with_validation() {
+            local app_id=$1
+            local role=$2
+            local subscription_id=$3
+            
+            echo "Validating role: $role"
+            
+            if validate_role_assignment "$app_id" "$role" "$subscription_id"; then
+              echo "✓ Role is valid: $role"
+              return 0
+            fi
+            
+            # Clean up any invalid assignments
+            cleanup_invalid_roles "$app_id" "$role" "$subscription_id"
+            
+            # Create correct role assignment
+            echo "Assigning role: $role"
+            az role assignment create \
+              --assignee "$app_id" \
+              --role "$role" \
+              --scope "/subscriptions/$subscription_id" \
+              2>/dev/null || true
+            
+            # Wait for propagation
+            sleep 5
+            
+            # Verify assignment
+            if validate_role_assignment "$app_id" "$role" "$subscription_id"; then
+              echo "✓ Assigned role: $role"
+            else
+              echo "⚠ Warning: Role assignment may not have propagated yet: $role"
+            fi
+          }
+          
           # Check if application exists
           echo "Checking if Azure AD Application exists..."
           APP_ID=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)
@@ -86,83 +237,34 @@ jobs:
             echo "✓ Service Principal already exists: $SP_ID"
           fi
           
-          # Function to create or update federated credential
-          create_federated_credential() {
-            local cred_name=$1
-            local subject=$2
-            local description=$3
-            
-            echo "Checking federated credential: $cred_name"
-            
-            # Check if credential exists
-            EXISTING_CRED=$(az ad app federated-credential list \
-              --id "$APP_OBJECT_ID" \
-              --query "[?name=='$cred_name'].name" -o tsv)
-            
-            if [ -z "$EXISTING_CRED" ]; then
-              echo "Creating federated credential: $cred_name"
-              az ad app federated-credential create \
-                --id "$APP_OBJECT_ID" \
-                --parameters "{
-                  \"name\": \"$cred_name\",
-                  \"issuer\": \"https://token.actions.githubusercontent.com\",
-                  \"subject\": \"$subject\",
-                  \"audiences\": [\"api://AzureADTokenExchange\"],
-                  \"description\": \"$description\"
-                }"
-              echo "✓ Created credential: $cred_name"
-            else
-              echo "✓ Credential already exists: $cred_name"
-            fi
-          }
-          
-          # Create three federated credentials
+          # Create/validate three federated credentials
           echo ""
-          echo "Creating federated credentials..."
+          echo "Validating federated credentials..."
           
-          create_federated_credential \
+          create_or_update_federated_credential \
             "github-main" \
             "repo:${GITHUB_ORG}/${GITHUB_REPO}:ref:refs/heads/main" \
-            "GitHub Actions - Main Branch"
+            "GitHub Actions - Main Branch" \
+            "$APP_OBJECT_ID"
           
-          create_federated_credential \
+          create_or_update_federated_credential \
             "github-pr" \
             "repo:${GITHUB_ORG}/${GITHUB_REPO}:pull_request" \
-            "GitHub Actions - Pull Requests"
+            "GitHub Actions - Pull Requests" \
+            "$APP_OBJECT_ID"
           
-          create_federated_credential \
+          create_or_update_federated_credential \
             "github-environment" \
             "repo:${GITHUB_ORG}/${GITHUB_REPO}:environment:${ENVIRONMENT}" \
-            "GitHub Actions - Environment: ${ENVIRONMENT}"
+            "GitHub Actions - Environment: ${ENVIRONMENT}" \
+            "$APP_OBJECT_ID"
           
-          # Assign roles
+          # Validate and assign roles
           echo ""
-          echo "Assigning roles..."
+          echo "Validating role assignments..."
           
-          assign_role() {
-            local role=$1
-            echo "Checking role: $role"
-            
-            EXISTING_ROLE=$(az role assignment list \
-              --assignee "$APP_ID" \
-              --role "$role" \
-              --scope "/subscriptions/$SUBSCRIPTION_ID" \
-              --query "[0].roleDefinitionName" -o tsv)
-            
-            if [ -z "$EXISTING_ROLE" ]; then
-              echo "Assigning role: $role"
-              az role assignment create \
-                --assignee "$APP_ID" \
-                --role "$role" \
-                --scope "/subscriptions/$SUBSCRIPTION_ID"
-              echo "✓ Assigned role: $role"
-            else
-              echo "✓ Role already assigned: $role"
-            fi
-          }
-          
-          assign_role "Contributor"
-          assign_role "User Access Administrator"
+          assign_role_with_validation "$APP_ID" "Contributor" "$SUBSCRIPTION_ID"
+          assign_role_with_validation "$APP_ID" "User Access Administrator" "$SUBSCRIPTION_ID"
           
           # Output results
           echo ""

@@ -169,42 +169,52 @@ fi
 
 print_header "Creating Federated Identity Credentials"
 
-# Function to create or update federated credential
+# Function to create or update federated credential with validation
 create_federated_credential() {
     local name="$1"
     local subject="$2"
     local description="$3"
     
-    print_info "Creating credential: $name"
+    print_info "Validating credential: $name"
     
-    # Check if credential already exists
-    EXISTING_CRED=$(az ad app federated-credential list --id "$OBJECT_ID" --query "[?name=='$name'].name" -o tsv 2>/dev/null || echo "")
+    # Check if credential already exists and get its subject
+    EXISTING_SUBJECT=$(az ad app federated-credential list \
+        --id "$OBJECT_ID" \
+        --query "[?name=='$name'].subject" -o tsv 2>/dev/null || echo "")
     
-    if [ -n "$EXISTING_CRED" ]; then
-        print_warning "  Credential already exists, updating"
-        az ad app federated-credential update \
-            --id "$OBJECT_ID" \
-            --federated-credential-id "$name" \
-            --parameters "{
-                \"name\": \"$name\",
-                \"issuer\": \"https://token.actions.githubusercontent.com\",
-                \"subject\": \"$subject\",
-                \"audiences\": [\"api://AzureADTokenExchange\"],
-                \"description\": \"$description\"
-            }" > /dev/null
-        print_success "  Updated: $name"
-    else
-        az ad app federated-credential create \
-            --id "$OBJECT_ID" \
-            --parameters "{
-                \"name\": \"$name\",
-                \"issuer\": \"https://token.actions.githubusercontent.com\",
-                \"subject\": \"$subject\",
-                \"audiences\": [\"api://AzureADTokenExchange\"],
-                \"description\": \"$description\"
-            }" > /dev/null
-        print_success "  Created: $name"
+    if [ -n "$EXISTING_SUBJECT" ]; then
+        # Credential exists - validate subject matches
+        if [ "$EXISTING_SUBJECT" = "$subject" ]; then
+            print_success "  Credential is valid: $name"
+            echo "    Subject: $subject"
+            return 0
+        else
+            print_warning "  Credential exists but subject mismatch"
+            echo "    Expected: $subject"
+            echo "    Found:    $EXISTING_SUBJECT"
+            print_info "  Deleting invalid credential"
+            
+            az ad app federated-credential delete \
+                --id "$OBJECT_ID" \
+                --federated-credential-id "$name" \
+                --yes 2>/dev/null || true
+            
+            sleep 2  # Wait for deletion to propagate
+        fi
     fi
+    
+    # Create credential (either new or replacement)
+    print_info "  Creating credential: $name"
+    az ad app federated-credential create \
+        --id "$OBJECT_ID" \
+        --parameters "{
+            \"name\": \"$name\",
+            \"issuer\": \"https://token.actions.githubusercontent.com\",
+            \"subject\": \"$subject\",
+            \"audiences\": [\"api://AzureADTokenExchange\"],
+            \"description\": \"$description\"
+        }" > /dev/null
+    print_success "  Created: $name"
     echo "    Subject: $subject"
 }
 
@@ -226,27 +236,61 @@ create_federated_credential \
 
 print_header "Assigning Azure Roles"
 
-# Function to assign role
+# Function to validate and assign role
 assign_role() {
     local role="$1"
     
-    print_info "Assigning role: $role"
+    print_info "Validating role: $role"
     
-    # Check if role assignment already exists
-    EXISTING_ASSIGNMENT=$(az role assignment list \
+    # Check if role assignment exists at correct scope
+    EXISTING_SCOPE=$(az role assignment list \
         --assignee "$SP_OBJECT_ID" \
-        --scope "/subscriptions/$SUBSCRIPTION_ID" \
         --role "$role" \
-        --query '[0].id' -o tsv 2>/dev/null || echo "")
+        --query "[0].scope" -o tsv 2>/dev/null || echo "")
     
-    if [ -n "$EXISTING_ASSIGNMENT" ]; then
-        print_warning "  Role already assigned: $role"
-    else
-        az role assignment create \
+    EXPECTED_SCOPE="/subscriptions/$SUBSCRIPTION_ID"
+    
+    if [ "$EXISTING_SCOPE" = "$EXPECTED_SCOPE" ]; then
+        print_success "  Role is valid: $role"
+        return 0
+    fi
+    
+    if [ -n "$EXISTING_SCOPE" ] && [ "$EXISTING_SCOPE" != "$EXPECTED_SCOPE" ]; then
+        print_warning "  Role exists at wrong scope: $EXISTING_SCOPE"
+        print_info "  Cleaning up incorrect assignments"
+        
+        # Get all assignments for this role and clean up incorrect ones
+        az role assignment list \
             --assignee "$SP_OBJECT_ID" \
             --role "$role" \
-            --scope "/subscriptions/$SUBSCRIPTION_ID" > /dev/null
+            --query "[].id" -o tsv | while read assignment_id; do
+            local scope=$(az role assignment list --query "[?id=='$assignment_id'].scope" -o tsv)
+            if [ "$scope" != "$EXPECTED_SCOPE" ]; then
+                print_info "    Removing: $scope"
+                az role assignment delete --ids "$assignment_id" 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # Assign role at correct scope
+    print_info "  Assigning role: $role"
+    az role assignment create \
+        --assignee "$SP_OBJECT_ID" \
+        --role "$role" \
+        --scope "$EXPECTED_SCOPE" > /dev/null 2>&1 || true
+    
+    sleep 3  # Wait for propagation
+    
+    # Verify assignment
+    VERIFY_SCOPE=$(az role assignment list \
+        --assignee "$SP_OBJECT_ID" \
+        --role "$role" \
+        --query "[0].scope" -o tsv 2>/dev/null || echo "")
+    
+    if [ "$VERIFY_SCOPE" = "$EXPECTED_SCOPE" ]; then
         print_success "  Assigned: $role"
+    else
+        print_warning "  Assignment may not have propagated yet: $role"
     fi
 }
 
