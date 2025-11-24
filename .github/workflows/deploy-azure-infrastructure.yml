@@ -78,11 +78,15 @@ jobs:
         run: |
           chmod +x scripts/setup-terraform-backend.sh
           
-          # Pass values directly from secrets to script
+          # Sanitize secrets to remove any trailing whitespace/newlines
+          CLEAN_SUBSCRIPTION_ID=$(echo -n "${{ secrets.AZURE_SUBSCRIPTION_ID }}" | tr -d '\n\r' | xargs)
+          CLEAN_CLIENT_ID=$(echo -n "${{ secrets.AZURE_CLIENT_ID }}" | tr -d '\n\r' | xargs)
+          
+          # Pass sanitized values to script
           export AZURE_LOCATION=${{ env.AZURE_LOCATION }}
           export PROJECT_NAME=testcontainers
-          export AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          export ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}
+          export AZURE_SUBSCRIPTION_ID="$CLEAN_SUBSCRIPTION_ID"
+          export ARM_CLIENT_ID="$CLEAN_CLIENT_ID"
           export ENVIRONMENT_TAG=${{ env.ENVIRONMENT_TAG }}
           
           # Run setup script with bash -x for debugging
@@ -196,8 +200,11 @@ jobs:
       - name: Sanitize Azure secrets for terraform-plan
         run: |
           # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
-          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
-          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "ARM_USE_AZUREAD=true" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
           echo "TF_VAR_github_pat=$(echo -n '${{ secrets.PAT_TOKEN }}' | tr -d '\n\r')" >> $GITHUB_ENV
 
@@ -323,8 +330,11 @@ jobs:
       - name: Sanitize Azure secrets
         run: |
           # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
-          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
-          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "ARM_USE_AZUREAD=true" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r')" >> $GITHUB_ENV
           echo "TF_VAR_github_pat=$(echo -n '${{ secrets.PAT_TOKEN }}' | tr -d '\n\r')" >> $GITHUB_ENV
 
@@ -402,6 +412,15 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Sanitize Azure secrets for rollback
+        run: |
+          # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "ARM_USE_AZUREAD=true" >> $GITHUB_ENV
+
       - name: Check if infrastructure was partially deployed
         id: check-state
         working-directory: Azure/terraform
@@ -427,11 +446,7 @@ jobs:
         continue-on-error: true
         env:
           TF_VAR_github_pat: ${{ secrets.PAT_TOKEN }}
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
-          ARM_USE_AZUREAD: true
+          # Using sanitized environment variables from previous step
         run: |
           cat > terraform.tfvars <<EOF
           location     = "${{ env.AZURE_LOCATION }}"

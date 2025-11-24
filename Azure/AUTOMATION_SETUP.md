@@ -112,6 +112,13 @@ After the bootstrap workflow completes:
 | `AZURE_TENANT_ID` | Tenant ID | From workflow output |
 | `AZURE_SUBSCRIPTION_ID` | Subscription ID | From workflow output |
 
+⚠️ **CRITICAL: Avoid Trailing Newlines**
+- **Copy values carefully** - do NOT include extra spaces or newlines
+- **Paste directly** without pressing Enter after
+- **Verify** by checking secret has no line breaks
+- Trailing newlines cause URL parsing errors in Terraform: `invalid control character in URL`
+- The workflow automatically sanitizes secrets, but clean input prevents issues
+
 **Pro tip:** The workflow output has the exact values to copy - no newlines or extra spaces.
 
 ### Step 3: Deploy Infrastructure

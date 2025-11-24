@@ -99,7 +99,66 @@ az account set --subscription "YOUR_SUBSCRIPTION_ID"
 
 ---
 
-### 4. Backend State Lock Timeout
+### 4. Invalid Control Character in URL (Trailing Newlines)
+
+**Error:**
+```
+Error: populating Resource Provider cache: loading results: building GET request: 
+parse "https://management.azure.com/subscriptions/***\n/providers": 
+net/url: invalid control character in URL
+```
+
+**Cause:** GitHub Secrets contain trailing newlines or whitespace characters, causing URL parsing errors.
+
+**Solutions:**
+
+#### Option 1: Re-create Secrets (Recommended)
+```bash
+# Get clean values from OIDC setup output
+cd infrastructure/Azure/scripts
+./setup-oidc-manually.sh alokkulkarni infrastructure dev
+
+# Copy output values carefully (no trailing spaces/newlines)
+# Go to: https://github.com/YOUR_ORG/YOUR_REPO/settings/secrets/actions
+# Update each secret:
+# - AZURE_CLIENT_ID
+# - AZURE_TENANT_ID
+# - AZURE_SUBSCRIPTION_ID
+
+# When pasting:
+# 1. Paste the value
+# 2. DO NOT press Enter after pasting
+# 3. Click "Update secret" immediately
+```
+
+#### Option 2: Verify Secret Values
+```bash
+# Check if secrets have newlines (they'll show as extra lines in workflow logs)
+# In GitHub Actions logs, look for:
+echo "Subscription: '${{ secrets.AZURE_SUBSCRIPTION_ID }}'"
+# If you see extra blank lines, the secret has newlines
+
+# Delete and recreate the secret without newlines
+```
+
+#### Option 3: Already Fixed in Workflow
+The workflow now automatically sanitizes all secrets by:
+- Removing newlines with `tr -d '\n\r'`
+- Trimming whitespace with `xargs`
+
+If you're still seeing this error:
+1. Pull the latest workflow changes
+2. Re-run the workflow
+
+**Prevention:** 
+- Always copy values from command output, not from text files
+- Don't paste secrets from editors that add newlines
+- Use the workflow output which provides clean values
+- GitHub UI sometimes adds newlines when you press Enter - avoid this
+
+---
+
+### 5. Backend State Lock Timeout
 
 **Error:**
 ```
@@ -128,7 +187,7 @@ terraform force-unlock LOCK_ID
 
 ---
 
-### 5. Subscription ID Not Found
+### 6. Subscription ID Not Found
 
 **Error:**
 ```
@@ -154,7 +213,7 @@ az account show --query id -o tsv
 
 ---
 
-### 6. Storage Account Name Conflict
+### 7. Storage Account Name Conflict
 
 **Error:**
 ```
@@ -179,7 +238,7 @@ STORAGE_ACCOUNT="uniquename$(echo $SUBSCRIPTION_ID | cut -c1-8)"
 
 ---
 
-### 7. Insufficient RBAC Permissions
+### 8. Insufficient RBAC Permissions
 
 **Error:**
 ```
@@ -210,7 +269,7 @@ az role assignment create \
 
 ---
 
-### 8. Resource Already Exists
+### 9. Resource Already Exists
 
 **Error:**
 ```
@@ -234,7 +293,7 @@ terraform refresh
 
 ---
 
-### 9. Virtual Network Deployment Failures
+### 10. Virtual Network Deployment Failures
 
 **Error:**
 ```
