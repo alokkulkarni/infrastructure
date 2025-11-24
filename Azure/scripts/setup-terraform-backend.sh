@@ -30,21 +30,12 @@ if [ -z "$AZURE_LOCATION" ]; then
     exit 1
 fi
 
-# Get Azure Subscription ID for unique naming
-# Try to get from environment first (set by GitHub Actions), then from az account
-if [ -n "$ARM_SUBSCRIPTION_ID" ]; then
-    # Trim whitespace and newlines from the subscription ID
-    AZURE_SUBSCRIPTION_ID=$(echo "$ARM_SUBSCRIPTION_ID" | tr -d '[:space:]')
-    echo -e "${GREEN}Using subscription from ARM_SUBSCRIPTION_ID environment variable${NC}"
-else
-    AZURE_SUBSCRIPTION_ID=$(az account show --query id --output tsv 2>/dev/null)
-    if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
-        echo -e "${RED}Error: Unable to retrieve Azure Subscription ID${NC}"
-        echo -e "${RED}Please ensure you are logged in with 'az login' or set ARM_SUBSCRIPTION_ID${NC}"
-        exit 1
-    fi
+# Get Azure Subscription ID from environment (passed from GitHub Actions)
+if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+    echo -e "${RED}Error: AZURE_SUBSCRIPTION_ID environment variable is not set${NC}"
+    exit 1
 fi
-echo "Subscription ID: $AZURE_SUBSCRIPTION_ID"
+echo -e "${GREEN}Using subscription ID from environment${NC}"
 
 # Derive resource names dynamically
 PROJECT_NAME="${PROJECT_NAME:-testcontainers}"
@@ -64,23 +55,21 @@ echo ""
 
 # Check if resource group exists
 echo -e "${YELLOW}Checking if resource group exists...${NC}"
-echo "DEBUG: Checking resource group with subscription: $AZURE_SUBSCRIPTION_ID"
 
-if az group show --name $RESOURCE_GROUP_NAME --subscription $AZURE_SUBSCRIPTION_ID &> /dev/null; then
+if az group show --name $RESOURCE_GROUP_NAME &> /dev/null; then
     echo -e "${GREEN}✓ Resource group already exists, reusing existing resource group${NC}"
 else
     echo -e "${YELLOW}Creating resource group...${NC}"
     az group create \
         --name $RESOURCE_GROUP_NAME \
         --location $AZURE_LOCATION \
-        --subscription $AZURE_SUBSCRIPTION_ID \
         --tags Environment=shared ManagedBy=Terraform Purpose=TerraformState
     echo -e "${GREEN}✓ Resource group created${NC}"
 fi
 
 # Check if storage account exists
 echo -e "${YELLOW}Checking if storage account exists...${NC}"
-if az storage account show --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP_NAME --subscription $AZURE_SUBSCRIPTION_ID &> /dev/null; then
+if az storage account show --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP_NAME &> /dev/null; then
     echo -e "${GREEN}✓ Storage account already exists, reusing existing storage account${NC}"
 else
     echo -e "${YELLOW}Creating storage account...${NC}"
@@ -88,7 +77,6 @@ else
         --name $STORAGE_ACCOUNT_NAME \
         --resource-group $RESOURCE_GROUP_NAME \
         --location $AZURE_LOCATION \
-        --subscription $AZURE_SUBSCRIPTION_ID \
         --sku Standard_LRS \
         --encryption-services blob \
         --min-tls-version TLS1_2 \
@@ -103,7 +91,6 @@ echo -e "${YELLOW}Enabling blob versioning...${NC}"
 az storage account blob-service-properties update \
     --account-name $STORAGE_ACCOUNT_NAME \
     --resource-group $RESOURCE_GROUP_NAME \
-    --subscription $AZURE_SUBSCRIPTION_ID \
     --enable-versioning true
 echo -e "${GREEN}✓ Blob versioning enabled${NC}"
 
@@ -115,7 +102,6 @@ if [ -n "$ARM_CLIENT_ID" ]; then
     STORAGE_ACCOUNT_ID=$(az storage account show \
         --name $STORAGE_ACCOUNT_NAME \
         --resource-group $RESOURCE_GROUP_NAME \
-        --subscription $AZURE_SUBSCRIPTION_ID \
         --query id -o tsv)
     
     # Assign Storage Blob Data Contributor role to the service principal
@@ -124,7 +110,6 @@ if [ -n "$ARM_CLIENT_ID" ]; then
         --assignee $ARM_CLIENT_ID \
         --role "Storage Blob Data Contributor" \
         --scope $STORAGE_ACCOUNT_ID \
-        --subscription $AZURE_SUBSCRIPTION_ID \
         2>/dev/null || echo -e "${YELLOW}Note: Role assignment may already exist${NC}"
     
     # Assign Storage Account Contributor role for backend operations
@@ -133,7 +118,6 @@ if [ -n "$ARM_CLIENT_ID" ]; then
         --assignee $ARM_CLIENT_ID \
         --role "Storage Account Contributor" \
         --scope $STORAGE_ACCOUNT_ID \
-        --subscription $AZURE_SUBSCRIPTION_ID \
         2>/dev/null || echo -e "${YELLOW}Note: Role assignment may already exist${NC}"
     
     echo -e "${GREEN}✓ RBAC permissions configured${NC}"
@@ -146,7 +130,7 @@ fi
 
 # Check if container exists
 echo -e "${YELLOW}Checking if container exists...${NC}"
-ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP_NAME --account-name $STORAGE_ACCOUNT_NAME --subscription $AZURE_SUBSCRIPTION_ID --query '[0].value' -o tsv)
+ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP_NAME --account-name $STORAGE_ACCOUNT_NAME --query '[0].value' -o tsv)
 
 if az storage container show \
     --name $CONTAINER_NAME \
