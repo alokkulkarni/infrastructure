@@ -10,6 +10,18 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}Setting up Terraform Backend for Azure...${NC}"
 
+# Verify Azure CLI authentication first
+echo -e "${YELLOW}Verifying Azure CLI authentication...${NC}"
+if ! az account show &> /dev/null; then
+    echo -e "${RED}ERROR: Not authenticated with Azure CLI${NC}"
+    echo -e "${RED}Please ensure 'az login' has been run successfully${NC}"
+    exit 1
+fi
+
+CURRENT_ACCOUNT=$(az account show --query "{name:name, id:id, user:user.name}" -o json)
+echo -e "${GREEN}✓ Authenticated as:${NC}"
+echo "$CURRENT_ACCOUNT"
+
 # Check required environment variables
 if [ -z "$AZURE_LOCATION" ]; then
     echo -e "${RED}Error: AZURE_LOCATION environment variable is not set${NC}"
