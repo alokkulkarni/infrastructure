@@ -349,6 +349,7 @@ jobs:
           fi
 
       - name: Destroy partially created infrastructure
+        id: destroy
         if: steps.check-state.outputs.state_exists == 'true'
         working-directory: Azure/terraform
         continue-on-error: true
@@ -402,31 +403,85 @@ jobs:
             -target=module.networking \
             -target=azurerm_resource_group.main \
             -auto-approve
+          
+          # Capture exit code
+          DESTROY_EXIT_CODE=$?
+          echo "exit_code=$DESTROY_EXIT_CODE" >> $GITHUB_OUTPUT
+          
+          if [ $DESTROY_EXIT_CODE -eq 0 ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Clean up Terraform state
+      - name: Purge soft-deleted Key Vaults
         if: always()
         continue-on-error: true
         run: |
+          echo "Checking for soft-deleted Key Vaults..."
+          
+          # List soft-deleted key vaults for this environment tag
+          DELETED_KVS=$(az keyvault list-deleted \
+            --query "[?tags.EnvironmentTag=='${{ env.ENVIRONMENT_TAG }}'].name" \
+            -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$DELETED_KVS" ]; then
+            echo "No soft-deleted Key Vaults found for environment tag: ${{ env.ENVIRONMENT_TAG }}"
+            exit 0
+          fi
+          
+          # Purge each soft-deleted key vault
+          for KV_NAME in $DELETED_KVS; do
+            echo "Purging Key Vault: $KV_NAME"
+            az keyvault purge --name "$KV_NAME" --no-wait || true
+          done
+          
+          echo "✅ Key Vault purge initiated"
+
+      - name: Clean up Terraform state
+        if: steps.destroy.outputs.success == 'true'
+        continue-on-error: true
+        run: |
           if [ -n "${{ needs.setup-backend.outputs.backend_storage_account }}" ]; then
-            echo "Removing Terraform state file..."
+            echo "Destroy succeeded, cleaning up state file..."
             az storage blob delete \
               --account-name ${{ needs.setup-backend.outputs.backend_storage_account }} \
               --container-name tfstate \
               --name azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate \
-              --auth-mode login || true
+              --auth-mode login
+            echo "✅ State file deleted"
           fi
+
+      - name: State cleanup skipped
+        if: steps.destroy.outputs.success != 'true'
+        run: |
+          echo "⚠️ Destroy failed or was skipped, preserving state file for manual cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Manual Cleanup Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To manually clean up:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Fix the destroy issue" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run: \`terraform destroy\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Delete state file manually if needed" >> $GITHUB_STEP_SUMMARY
 
       - name: Rollback Summary
         if: always()
         run: |
-          echo "## Rollback Completed" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔄 Rollback Completed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The deployment failed and rollback was attempted." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Actions taken:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Checked for partially deployed infrastructure" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Destroyed any partially created resources" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Cleaned up Terraform state file" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Purged soft-deleted Key Vaults" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.destroy.outputs.success }}" == "true" ]; then
+            echo "- ✅ Cleaned up Terraform state file" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⚠️ State file preserved (destroy incomplete)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Note:** Backend resources (Resource Group and Storage Account) are preserved for future deployments." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

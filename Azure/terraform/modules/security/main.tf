@@ -10,9 +10,10 @@ resource "azurerm_network_security_group" "main" {
   resource_group_name = var.resource_group_name
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 

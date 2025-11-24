@@ -14,9 +14,10 @@ resource "azurerm_public_ip" "vm" {
   sku                 = "Standard"
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
@@ -34,9 +35,10 @@ resource "azurerm_network_interface" "main" {
   }
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
@@ -101,9 +103,10 @@ resource "azurerm_linux_virtual_machine" "main" {
   }))
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
@@ -124,9 +127,10 @@ resource "azurerm_key_vault" "main" {
   purge_protection_enabled   = false
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 

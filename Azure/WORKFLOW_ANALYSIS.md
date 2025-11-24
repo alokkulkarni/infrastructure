@@ -888,6 +888,68 @@ The workflows are functionally correct and will properly destroy infrastructure.
 
 ---
 
+## 8. Resource Tagging Strategy
+
+### Current Implementation
+
+All Azure resources are tagged with consistent metadata matching AWS strategy:
+
+```hcl
+tags = {
+  Environment    = var.environment       # e.g., "dev", "staging", "prod"
+  EnvironmentTag = var.environment_tag   # e.g., "SIT-alok-team1-20251124-1400"
+  Project        = var.project_name      # e.g., "testcontainers"
+  ManagedBy      = "Terraform"          # Infrastructure as Code tracking
+}
+```
+
+### Benefits
+
+1. **Cost Allocation**: Track costs per environment and environment tag
+2. **Resource Discovery**: Find all resources for a specific test environment
+3. **Cleanup Verification**: Identify orphaned resources by environment tag
+4. **Audit Trail**: Track which resources are managed by Terraform
+5. **Multi-Environment Support**: Isolate resources by environment tag
+
+### Tag Usage in Workflows
+
+**In Rollback (WORKFLOW_ANALYSIS.md Issue #1):**
+```bash
+# Purge soft-deleted Key Vaults for specific environment
+az keyvault list-deleted \
+  --query "[?tags.EnvironmentTag=='${{ env.ENVIRONMENT_TAG }}'].name"
+```
+
+**In Cost Analysis:**
+```bash
+# Get monthly costs by environment tag
+az consumption usage list \
+  --query "[?tags.EnvironmentTag=='SIT-alok-team1-20251124-1400']" \
+  --output table
+```
+
+**In Resource Discovery:**
+```bash
+# Find all resources for a specific environment
+az resource list \
+  --tag EnvironmentTag=SIT-alok-team1-20251124-1400 \
+  --output table
+```
+
+### Comparison with AWS
+
+| Feature | AWS | Azure | Status |
+|---------|-----|-------|--------|
+| Environment Tag | ✅ Yes | ✅ Yes | ✅ Consistent |
+| EnvironmentTag (unique) | ✅ Yes | ✅ Yes | ✅ Consistent |
+| Project Tag | ✅ Yes | ✅ Yes | ✅ Consistent |
+| ManagedBy Tag | ✅ Yes | ✅ Yes | ✅ Consistent |
+| Provider-level Tags | ✅ default_tags | ❌ Manual | ⚠️ Manual in modules |
+
+**Note:** AWS uses `provider.default_tags` to apply tags automatically, while Azure requires explicit `tags` blocks in each resource.
+
+---
+
 ## Quick Reference
 
 ### What Gets Destroyed on Rollback/Destroy?

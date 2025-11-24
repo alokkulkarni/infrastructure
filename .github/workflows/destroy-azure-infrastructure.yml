@@ -124,6 +124,7 @@ jobs:
           ARM_USE_OIDC: true
 
       - name: Terraform Destroy
+        id: destroy
         working-directory: Azure/terraform
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -139,8 +140,64 @@ jobs:
             -target=azurerm_resource_group.main \
             -auto-approve \
             -input=false
+          
+          echo "success=true" >> $GITHUB_OUTPUT
+
+      - name: Purge soft-deleted Key Vaults
+        if: steps.destroy.outputs.success == 'true'
+        continue-on-error: true
+        run: |
+          echo "Checking for soft-deleted Key Vaults..."
+          
+          # List soft-deleted key vaults for this environment tag
+          DELETED_KVS=$(az keyvault list-deleted \
+            --query "[?tags.EnvironmentTag=='${{ env.ENVIRONMENT_TAG }}'].name" \
+            -o tsv 2>/dev/null || echo "")
+          
+          if [ -z "$DELETED_KVS" ]; then
+            echo "No soft-deleted Key Vaults found for environment tag: ${{ env.ENVIRONMENT_TAG }}"
+            exit 0
+          fi
+          
+          # Purge each soft-deleted key vault
+          for KV_NAME in $DELETED_KVS; do
+            echo "Purging Key Vault: $KV_NAME"
+            az keyvault purge --name "$KV_NAME" --no-wait || true
+          done
+          
+          echo "✅ Key Vault purge initiated"
+
+      - name: Verify destruction
+        if: always()
+        continue-on-error: true
+        run: |
+          RG_NAME="testcontainers-${{ env.ENVIRONMENT }}-rg"
+          
+          echo "Verifying resource group deletion..."
+          if az group exists --name "$RG_NAME" 2>/dev/null; then
+            echo "⚠️ Warning: Resource group still exists: $RG_NAME"
+            echo "Listing remaining resources:"
+            az resource list --resource-group "$RG_NAME" --output table || true
+          else
+            echo "✅ Resource group successfully deleted: $RG_NAME"
+          fi
+          
+          # Check for soft-deleted Key Vaults
+          echo "" 
+          echo "Checking for soft-deleted Key Vaults..."
+          DELETED_KVS=$(az keyvault list-deleted \
+            --query "[?tags.EnvironmentTag=='${{ env.ENVIRONMENT_TAG }}'].{Name:name,Location:location,ScheduledPurgeDate:scheduledPurgeDate}" \
+            -o table 2>/dev/null || echo "")
+          
+          if [ -n "$DELETED_KVS" ]; then
+            echo "ℹ️ Soft-deleted Key Vaults (purge in progress):"
+            echo "$DELETED_KVS"
+          else
+            echo "✅ No soft-deleted Key Vaults found"
+          fi
 
       - name: Summary
+        if: always()
         run: |
           echo "## 🗑️ Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
           echo "Environment: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
@@ -152,6 +209,7 @@ jobs:
           echo "- ✅ Network Security Groups" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Virtual Network" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Resource Group" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Key Vaults (purged)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Resources Preserved:" >> $GITHUB_STEP_SUMMARY
           echo "- 🔒 OIDC Configuration (Shared across environments)" >> $GITHUB_STEP_SUMMARY

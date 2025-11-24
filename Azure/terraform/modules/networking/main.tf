@@ -13,9 +13,10 @@ resource "azurerm_virtual_network" "main" {
   resource_group_name = var.resource_group_name
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
@@ -44,9 +45,10 @@ resource "azurerm_public_ip" "nat" {
   sku                 = "Standard"
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
@@ -58,9 +60,10 @@ resource "azurerm_nat_gateway" "main" {
   sku_name            = "Standard"
 
   tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    ManagedBy   = "Terraform"
+    Environment    = var.environment
+    EnvironmentTag = var.environment_tag
+    Project        = var.project_name
+    ManagedBy      = "Terraform"
   }
 }
 
