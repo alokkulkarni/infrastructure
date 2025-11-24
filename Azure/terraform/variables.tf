@@ -18,7 +18,7 @@ variable "environment_tag" {
 variable "location" {
   description = "Azure region to deploy resources"
   type        = string
-  default     = "eastus"
+  default     = "uksouth"
 }
 
 variable "vnet_address_space" {

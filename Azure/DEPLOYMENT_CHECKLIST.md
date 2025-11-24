@@ -38,7 +38,7 @@
 # 3. Click "Run workflow"
 # 4. Select:
 #    - Environment: dev
-#    - Azure Region: eastus (or your preferred region)
+#    - Azure Region: uksouth (or your preferred region)
 # 5. Click "Run workflow"
 
 # Option B: Local Deployment

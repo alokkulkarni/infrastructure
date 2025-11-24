@@ -90,7 +90,7 @@ GitHub Actions → OIDC Token Request → GitHub OIDC Provider
 cd infrastructure/Azure
 
 # Set environment variables
-export AZURE_LOCATION="eastus"
+export AZURE_LOCATION="uksouth"
 export RESOURCE_GROUP_NAME="terraform-state-rg"
 export STORAGE_ACCOUNT_NAME="tfstate$(openssl rand -hex 4)"
 

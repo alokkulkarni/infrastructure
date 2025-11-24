@@ -78,7 +78,7 @@ This ensures unique runner names and prevents registration conflicts.
 ```
 Environment: dev
 Environment Tag: SIT-john-teamA-20251120-1430
-Location: eastus
+Location: uksouth
 ```
 
 ### Destroy Infrastructure
@@ -124,7 +124,7 @@ You must destroy with the **exact same** tag: `SIT-john-teamA-20251120-1430`
 ```
 Environment: dev
 Tag: SIT-alice-teamA-20251120-1400
-Region: eastus
+Region: uksouth
 ```
 
 **Team B**:
@@ -327,7 +327,7 @@ Teams can deploy to different Azure regions:
 Workflow: deploy-azure-infrastructure.yml
 Environment: dev
 Tag: SIT-alice-feature1-20251120-1000
-Location: eastus
+Location: uksouth
 ```
 
 **Use Infrastructure**: Run tests, workflows, etc.
@@ -345,7 +345,7 @@ Confirm: destroy
 **Team 1 - Frontend**:
 ```
 Tag: SIT-frontend-sprint5-20251120-0900
-Region: eastus
+Region: uksouth
 Deploy at 9:00 AM
 Test frontend changes
 Destroy at 5:00 PM

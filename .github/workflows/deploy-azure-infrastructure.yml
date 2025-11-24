@@ -19,12 +19,12 @@ on:
       location:
         description: 'Azure Region'
         required: true
-        default: 'eastus'
+        default: 'uksouth'
         type: string
 
 env:
   TF_VERSION: '1.6.0'
-  AZURE_LOCATION: ${{ github.event.inputs.location || 'eastus' }}
+  AZURE_LOCATION: ${{ github.event.inputs.location || 'uksouth' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
   ENVIRONMENT_TAG: ${{ github.event.inputs.environment_tag }}
 

@@ -247,7 +247,7 @@ set -e
 RESOURCE_GROUP="terraform-state-rg"
 STORAGE_ACCOUNT="tfstate$(openssl rand -hex 4)"
 CONTAINER_NAME="tfstate"
-LOCATION="eastus"
+LOCATION="uksouth"
 
 echo "Creating Terraform backend in Azure..."
 
@@ -1438,7 +1438,7 @@ jobs:
       
       - name: Deploy resources
         run: |
-          az group create --name my-rg --location eastus
+          az group create --name my-rg --location uksouth
           az vm list
 ```
 
