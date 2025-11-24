@@ -193,6 +193,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD_AUTH: true
         run: |
           terraform plan \
             -out=tfplan \
@@ -286,6 +287,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD_AUTH: true
 
       - name: Download plan
         uses: actions/download-artifact@v4
@@ -301,6 +303,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD_AUTH: true
         run: |
           terraform apply \
             -auto-approve \
