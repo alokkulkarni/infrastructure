@@ -89,11 +89,11 @@ jobs:
           echo "Running setup script for environment tag: ${{ env.ENVIRONMENT_TAG }}"
           bash -x ./scripts/setup-terraform-backend.sh 2>&1 | tee setup_output.log
           
-          # Extract outputs from log - strip ANSI color codes and extract values
+          # Extract outputs from log - look for actual output lines and strip ANSI codes
           echo "Extracting backend configuration from setup output..."
-          BACKEND_RG=$(grep "export TF_BACKEND_RESOURCE_GROUP" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
-          BACKEND_SA=$(grep "export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
-          BACKEND_CONTAINER=$(grep "export TF_BACKEND_CONTAINER" setup_output.log | sed 's/\x1b\[[0-9;]*m//g' | cut -d'=' -f2)
+          BACKEND_RG=$(grep "^export TF_BACKEND_RESOURCE_GROUP" setup_output.log | cut -d'=' -f2 | sed 's/\x1b\[[0-9;]*m//g')
+          BACKEND_SA=$(grep "^export TF_BACKEND_STORAGE_ACCOUNT" setup_output.log | cut -d'=' -f2 | sed 's/\x1b\[[0-9;]*m//g')
+          BACKEND_CONTAINER=$(grep "^export TF_BACKEND_CONTAINER" setup_output.log | cut -d'=' -f2 | sed 's/\x1b\[[0-9;]*m//g')
           
           echo "Extracted values:"
           echo "  Resource Group: ${BACKEND_RG}"
