@@ -33,6 +33,7 @@ jobs:
     outputs:
       backend_resource_group: ${{ steps.backend.outputs.backend_resource_group }}
       backend_storage_account: ${{ steps.backend.outputs.backend_storage_account }}
+      backend_container: ${{ steps.backend.outputs.backend_container }}
     permissions:
       id-token: write
       contents: read
@@ -61,7 +62,9 @@ jobs:
           BACKEND_SA="tctfstate${SUBSCRIPTION_SHORT}"
           
           # Container name based on environment tag for isolation (same logic as deploy)
-          CONTAINER_NAME=$(echo "${{ env.ENVIRONMENT_TAG }}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+          # Use github.event.inputs directly to ensure we get the value
+          ENVIRONMENT_TAG="${{ github.event.inputs.environment_tag }}"
+          CONTAINER_NAME=$(echo "$ENVIRONMENT_TAG" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
           
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
@@ -70,6 +73,7 @@ jobs:
           echo "  Resource Group: ${BACKEND_RG}"
           echo "  Storage Account: ${BACKEND_SA} (${#BACKEND_SA} chars)"
           echo "  Container: ${CONTAINER_NAME}"
+          echo "  Environment Tag: ${ENVIRONMENT_TAG}"
 
   validate-destroy:
     name: Validate Destroy Request
