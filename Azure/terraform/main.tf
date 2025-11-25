@@ -82,6 +82,18 @@ module "security" {
   private_subnet_id   = module.networking.private_subnet_id
 }
 
+# Load Balancer Module (in public subnet)
+module "load_balancer" {
+  source = "./modules/load-balancer"
+
+  project_name        = var.project_name
+  environment         = var.environment
+  environment_tag     = var.environment_tag
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  public_subnet_id    = module.networking.public_subnet_id
+}
+
 # Virtual Machine Module (GitHub Runner)
 module "vm" {
   source = "./modules/vm"
@@ -100,6 +112,13 @@ module "vm" {
   github_repo_url      = var.github_repo_url
   github_runner_name   = var.github_runner_name
   github_runner_labels = var.github_runner_labels
+}
+
+# Associate VM NIC with Load Balancer Backend Pool
+resource "azurerm_network_interface_backend_address_pool_association" "main" {
+  network_interface_id    = module.vm.network_interface_id
+  ip_configuration_name   = "internal"
+  backend_address_pool_id = module.load_balancer.backend_pool_id
 }
 
 # Data source for current Azure configuration

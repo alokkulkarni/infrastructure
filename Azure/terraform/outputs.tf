@@ -28,6 +28,11 @@ output "nat_gateway_public_ip" {
   value       = module.networking.nat_public_ip
 }
 
+output "load_balancer_public_ip" {
+  description = "Public IP address of the Load Balancer (use this to access applications)"
+  value       = module.load_balancer.lb_public_ip
+}
+
 output "vm_id" {
   description = "Virtual machine ID"
   value       = module.vm.vm_id
@@ -38,19 +43,14 @@ output "vm_private_ip" {
   value       = module.vm.vm_private_ip
 }
 
-output "vm_public_ip" {
-  description = "Public IP address of the VM (for accessing applications)"
-  value       = module.vm.vm_public_ip
-}
-
 output "nginx_url" {
-  description = "URL to access the Nginx reverse proxy server"
-  value       = "http://${module.vm.vm_public_ip}"
+  description = "URL to access the Nginx reverse proxy server via Load Balancer"
+  value       = "http://${module.load_balancer.lb_public_ip}"
 }
 
 output "nginx_health_check" {
-  description = "URL for Nginx health check endpoint"
-  value       = "http://${module.vm.vm_public_ip}/health"
+  description = "URL for Nginx health check endpoint via Load Balancer"
+  value       = "http://${module.load_balancer.lb_public_ip}/health"
 }
 
 output "nsg_id" {

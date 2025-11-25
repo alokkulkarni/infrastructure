@@ -21,6 +21,11 @@ on:
         required: true
         default: 'uksouth'
         type: string
+      github_runner_repo:
+        description: 'GitHub repository for runner registration (format: owner/repo)'
+        required: true
+        default: 'alokkulkarni/sit-test-repo'
+        type: string
 
 env:
   TF_VERSION: '1.6.0'
@@ -157,7 +162,7 @@ jobs:
           vm_size        = "Standard_D2s_v3"
           admin_username = "azureuser"
           
-          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_repo_url      = "https://github.com/${{ github.event.inputs.github_runner_repo }}"
           github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
@@ -287,7 +292,7 @@ jobs:
           vm_size        = "Standard_D2s_v3"
           admin_username = "azureuser"
           
-          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_repo_url      = "https://github.com/${{ github.event.inputs.github_runner_repo }}"
           github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
@@ -505,7 +510,7 @@ jobs:
           vm_size        = "Standard_D2s_v3"
           admin_username = "azureuser"
           
-          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_repo_url      = "https://github.com/${{ github.event.inputs.github_runner_repo }}"
           github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
           github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
           
