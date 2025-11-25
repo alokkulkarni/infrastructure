@@ -132,11 +132,37 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
         run: |
-          # Destroy all modules EXCEPT OIDC to preserve authentication
+          # Destroy all resources in dependency order
+          # Note: TLS private key must be destroyed as it's a local Terraform resource
+          echo "Destroying infrastructure in dependency order..."
+          
+          # Destroy VM and all dependent resources first
           terraform destroy \
-            -target=module.vm \
+            -target=module.vm.azurerm_key_vault_secret.ssh_private_key \
+            -target=module.vm.azurerm_key_vault_access_policy.terraform \
+            -target=module.vm.azurerm_key_vault.main \
+            -target=module.vm.azurerm_linux_virtual_machine.main \
+            -target=module.vm.azurerm_network_interface_security_group_association.main \
+            -target=module.vm.azurerm_network_interface.main \
+            -target=module.vm.azurerm_public_ip.vm \
+            -target=module.vm.tls_private_key.ssh \
+            -auto-approve \
+            -input=false
+          
+          # Destroy security resources
+          terraform destroy \
             -target=module.security \
+            -auto-approve \
+            -input=false
+          
+          # Destroy networking resources
+          terraform destroy \
             -target=module.networking \
+            -auto-approve \
+            -input=false
+          
+          # Finally destroy the resource group
+          terraform destroy \
             -target=azurerm_resource_group.main \
             -auto-approve \
             -input=false

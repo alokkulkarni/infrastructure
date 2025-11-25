@@ -380,7 +380,36 @@ jobs:
       - name: Terraform Output
         working-directory: Azure/terraform
         run: |
-          echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Extract key outputs
+          VM_PUBLIC_IP=$(terraform output -raw vm_public_ip 2>/dev/null || echo "N/A")
+          NGINX_URL=$(terraform output -raw nginx_url 2>/dev/null || echo "N/A")
+          NGINX_HEALTH=$(terraform output -raw nginx_health_check 2>/dev/null || echo "N/A")
+          RG_NAME=$(terraform output -raw resource_group_name 2>/dev/null || echo "N/A")
+          
+          echo "### 🌐 Access Your Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | URL/Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **🔗 Nginx URL** | [${NGINX_URL}](${NGINX_URL}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **❤️ Health Check** | [${NGINX_HEALTH}](${NGINX_HEALTH}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **📍 Public IP** | \`${VM_PUBLIC_IP}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **📦 Resource Group** | \`${RG_NAME}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Quick Test Commands" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# Test Nginx is accessible" >> $GITHUB_STEP_SUMMARY
+          echo "curl -I ${NGINX_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Check health endpoint" >> $GITHUB_STEP_SUMMARY
+          echo "curl ${NGINX_HEALTH}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Complete Terraform Outputs" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           terraform output >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -499,11 +528,33 @@ jobs:
           
           terraform init
           
-          # Destroy all modules EXCEPT OIDC
+          # Destroy all resources in dependency order (same as destroy workflow)
+          echo "Destroying infrastructure in dependency order..."
+          
+          # Destroy VM and all dependent resources first
           terraform destroy \
-            -target=module.vm \
+            -target=module.vm.azurerm_key_vault_secret.ssh_private_key \
+            -target=module.vm.azurerm_key_vault_access_policy.terraform \
+            -target=module.vm.azurerm_key_vault.main \
+            -target=module.vm.azurerm_linux_virtual_machine.main \
+            -target=module.vm.azurerm_network_interface_security_group_association.main \
+            -target=module.vm.azurerm_network_interface.main \
+            -target=module.vm.azurerm_public_ip.vm \
+            -target=module.vm.tls_private_key.ssh \
+            -auto-approve
+          
+          # Destroy security resources
+          terraform destroy \
             -target=module.security \
+            -auto-approve
+          
+          # Destroy networking resources
+          terraform destroy \
             -target=module.networking \
+            -auto-approve
+          
+          # Finally destroy the resource group
+          terraform destroy \
             -target=azurerm_resource_group.main \
             -auto-approve
           
