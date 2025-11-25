@@ -155,6 +155,32 @@ jobs:
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
 
+      - name: Create terraform.tfvars for destroy
+        working-directory: Azure/terraform
+        run: |
+          cat > terraform.tfvars <<EOF
+          location     = "uksouth"
+          project_name = "testcontainers"
+          environment  = "${{ env.ENVIRONMENT }}"
+          environment_tag = "${{ env.ENVIRONMENT_TAG }}"
+          
+          vnet_address_space    = ["10.0.0.0/16"]
+          public_subnet_address_prefix   = ["10.0.1.0/24"]
+          private_subnet_address_prefix  = ["10.0.2.0/24"]
+          
+          vm_size        = "Standard_D2s_v3"
+          admin_username = "azureuser"
+          
+          github_repo_url      = "https://github.com/${{ github.repository }}"
+          github_runner_name   = "azure-vm-runner-${{ env.ENVIRONMENT_TAG }}"
+          github_runner_labels = ["self-hosted", "azure", "linux", "docker", "${{ env.ENVIRONMENT }}", "${{ env.ENVIRONMENT_TAG }}"]
+          
+          # OIDC Configuration
+          github_org  = "${{ github.repository_owner }}"
+          github_repo = "${{ github.event.repository.name }}"
+          EOF
+          echo "Terraform variables configured for destroy"
+
       - name: Terraform Destroy
         id: destroy
         working-directory: Azure/terraform
