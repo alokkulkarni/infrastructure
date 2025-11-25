@@ -109,9 +109,27 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Sanitize Azure secrets
+        run: |
+          # Strip any trailing newlines/whitespace from secrets to prevent URL parsing errors
+          echo "ARM_CLIENT_ID=$(echo -n '${{ secrets.AZURE_CLIENT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo -n '${{ secrets.AZURE_TENANT_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo -n '${{ secrets.AZURE_SUBSCRIPTION_ID }}' | tr -d '\n\r' | xargs)" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "ARM_USE_AZUREAD=true" >> $GITHUB_ENV
+
       - name: Update backend configuration
         working-directory: Azure/terraform
         run: |
+          # Validate outputs are not empty
+          if [ -z "${{ needs.setup-backend.outputs.backend_resource_group }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_storage_account }}" ] || [ -z "${{ needs.setup-backend.outputs.backend_container }}" ]; then
+            echo "ERROR: Backend outputs are empty!"
+            echo "Resource Group: '${{ needs.setup-backend.outputs.backend_resource_group }}'"
+            echo "Storage Account: '${{ needs.setup-backend.outputs.backend_storage_account }}'"
+            echo "Container: '${{ needs.setup-backend.outputs.backend_container }}'"
+            exit 1
+          fi
+          
           cat > backend.tf <<EOF
           terraform {
             backend "azurerm" {
@@ -119,27 +137,26 @@ jobs:
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
               key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
+              use_oidc             = true
             }
           }
           EOF
+          echo "Backend configuration:"
+          cat backend.tf
 
       - name: Terraform Init
         working-directory: Azure/terraform
         run: terraform init
         env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
 
       - name: Terraform Destroy
         id: destroy
         working-directory: Azure/terraform
         env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
         run: |
           # Destroy all resources in dependency order
           # Note: TLS private key must be destroyed as it's a local Terraform resource
