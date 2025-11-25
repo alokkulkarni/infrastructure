@@ -36,7 +36,102 @@ az provider list --query "[?registrationState=='Registering' || registrationStat
 
 ---
 
-### 2. Authorization_RequestDenied (Azure AD Application)
+### 2. Resource Already Exists (Import Required)
+
+**Error:**
+```
+Error: A resource with the ID "/subscriptions/***/resourceGroups/testcontainers-dev-rg" already exists - 
+to be managed via Terraform this resource needs to be imported into the State.
+
+  with azurerm_resource_group.main,
+  on main.tf line 35, in resource "azurerm_resource_group" "main":
+  35: resource "azurerm_resource_group" "main" {
+```
+
+**Cause:** 
+- Resource exists in Azure but not in Terraform state
+- Previous `terraform destroy` or rollback failed mid-execution
+- Resources were created manually outside Terraform
+- State file was deleted or corrupted
+
+**Solution 1: Import Existing Resources (Recommended)**
+
+Use the import helper script:
+```bash
+cd infrastructure/Azure/terraform
+../scripts/import-existing-resources.sh
+```
+
+Or manually import:
+```bash
+# Get your subscription ID
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+# Import the resource group
+terraform import azurerm_resource_group.main \
+  "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/testcontainers-dev-rg"
+
+# Import other resources if they exist
+terraform import 'module.networking.azurerm_virtual_network.main' \
+  "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/testcontainers-dev-rg/providers/Microsoft.Network/virtualNetworks/testcontainers-dev-vnet"
+
+# Verify import
+terraform state list
+terraform plan
+```
+
+**Solution 2: Delete Existing Resources and Recreate**
+
+⚠️ **WARNING:** This deletes all existing resources. Only use if you're sure!
+
+```bash
+# Delete the resource group (this deletes ALL resources inside it)
+az group delete --name testcontainers-dev-rg --yes --no-wait
+
+# Wait for deletion to complete (2-5 minutes)
+az group wait --name testcontainers-dev-rg --deleted
+
+# Run Terraform apply
+terraform apply
+```
+
+**Solution 3: Clean State and Retry (GitHub Actions)**
+
+If running in GitHub Actions and want to start fresh:
+
+```bash
+# Delete the state file container
+az storage container delete \
+  --name sit-test-container \
+  --account-name testcontainerstfstate2745ace7 \
+  --auth-mode login
+
+# Delete the resource group
+az group delete --name testcontainers-dev-rg --yes
+
+# Re-run the workflow
+```
+
+**Which Solution to Choose:**
+
+| Scenario | Recommended Solution |
+|----------|---------------------|
+| Resources have important data | **Solution 1: Import** |
+| Testing/Development environment | **Solution 2 or 3: Delete and recreate** |
+| Production environment | **Solution 1: Import (ONLY)** |
+| Rollback failed mid-execution | **Solution 2: Delete and recreate** |
+| State file lost/corrupted | **Solution 1: Import all resources** |
+
+**Prevention:**
+- Always use Terraform for resource lifecycle
+- Don't manually create resources that Terraform manages
+- Keep state file backups (versioning enabled on backend)
+- Use `terraform destroy` carefully and monitor completion
+- Test rollbacks in dev environment first
+
+---
+
+### 3. Authorization_RequestDenied (Azure AD Application)
 
 **Error:**
 ```
@@ -71,7 +166,7 @@ If you need Terraform to manage OIDC:
 
 ---
 
-### 3. Authentication Failures
+### 4. Authentication Failures
 
 **Error:**
 ```
@@ -99,7 +194,7 @@ az account set --subscription "YOUR_SUBSCRIPTION_ID"
 
 ---
 
-### 4. Invalid Control Character in URL (Trailing Newlines)
+### 5. Invalid Control Character in URL (Trailing Newlines)
 
 **Error:**
 ```
@@ -158,7 +253,7 @@ If you're still seeing this error:
 
 ---
 
-### 5. Backend State Lock Timeout
+### 6. Backend State Lock Timeout
 
 **Error:**
 ```
@@ -213,7 +308,7 @@ az account show --query id -o tsv
 
 ---
 
-### 7. Storage Account Name Conflict
+### 8. Storage Account Name Conflict
 
 **Error:**
 ```
@@ -269,7 +364,7 @@ az role assignment create \
 
 ---
 
-### 9. Resource Already Exists
+### 10. Resource Already Exists
 
 **Error:**
 ```
@@ -293,7 +388,7 @@ terraform refresh
 
 ---
 
-### 10. Virtual Network Deployment Failures
+### 11. Virtual Network Deployment Failures
 
 **Error:**
 ```
