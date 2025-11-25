@@ -118,13 +118,15 @@ resource "tls_private_key" "ssh" {
 
 # Store private key in Key Vault (optional backup)
 resource "azurerm_key_vault" "main" {
-  name                       = "${var.project_name}${var.environment}kv"
-  location                   = var.location
-  resource_group_name        = var.resource_group_name
-  tenant_id                  = data.azurerm_client_config.current.tenant_id
-  sku_name                   = "standard"
-  soft_delete_retention_days = 7
-  purge_protection_enabled   = false
+  name                            = "${var.project_name}${var.environment}kv"
+  location                        = var.location
+  resource_group_name             = var.resource_group_name
+  tenant_id                       = data.azurerm_client_config.current.tenant_id
+  sku_name                        = "standard"
+  soft_delete_retention_days      = 7
+  purge_protection_enabled        = false
+  enable_rbac_authorization       = false
+  public_network_access_enabled   = true
 
   tags = {
     Environment    = var.environment
@@ -132,6 +134,11 @@ resource "azurerm_key_vault" "main" {
     Project        = var.project_name
     ManagedBy      = "Terraform"
   }
+  
+  # Ensure VM is created first to avoid parallel operation conflicts
+  depends_on = [
+    azurerm_linux_virtual_machine.main
+  ]
 }
 
 # Key Vault access policy for Terraform
@@ -155,7 +162,16 @@ resource "azurerm_key_vault_secret" "ssh_private_key" {
   value        = tls_private_key.ssh.private_key_pem
   key_vault_id = azurerm_key_vault.main.id
 
-  depends_on = [azurerm_key_vault_access_policy.terraform]
+  depends_on = [
+    azurerm_key_vault_access_policy.terraform,
+    azurerm_key_vault.main
+  ]
+  
+  lifecycle {
+    ignore_changes = [
+      value  # Prevent unnecessary updates
+    ]
+  }
 }
 
 data "azurerm_client_config" "current" {}

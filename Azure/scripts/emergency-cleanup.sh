@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Emergency Cleanup Script
-# This script destroys Azure infrastructure by downloading and using the old state file
+# This script destroys Azure infrastructure by downloading and using the specified state file
 # Use this ONLY when the destroy workflow cannot access the correct state file
 
 set -e
@@ -17,18 +17,85 @@ echo -e "${YELLOW}  Emergency Infrastructure Cleanup${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo ""
 
-# Configuration
-STORAGE_ACCOUNT="tctfstate2745ace7"
-CONTAINER="sit-alok-teama-20251125-0921"
-OLD_STATE_BLOB="terraform.tfstate"
+# Parse command line arguments
+STORAGE_ACCOUNT=""
+CONTAINER=""
+STATE_BLOB=""
 RESOURCE_GROUP="testcontainers-tfstate-rg"
-ENVIRONMENT_TAG="SIT-Alok-TeamA-20251125-0921"
+ENVIRONMENT_TAG=""
 
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -a, --account NAME         Azure Storage Account name (required)"
+    echo "  -c, --container NAME       Storage Container name (required)"
+    echo "  -s, --state-file PATH      State file blob path (default: terraform.tfstate)"
+    echo "  -t, --tag TAG              Environment tag (optional, for cleanup verification)"
+    echo "  -r, --resource-group NAME  State storage resource group (default: testcontainers-tfstate-rg)"
+    echo "  -h, --help                 Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -a tctfstate2745ace7 -c sit-alok-teama-20251125-0921 -s terraform.tfstate"
+    echo "  $0 -a tctfstate2745ace7 -c dev-container -s azure/dev/SIT-Team-20251125/terraform.tfstate -t SIT-Team-20251125"
+    exit 1
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -a|--account)
+            STORAGE_ACCOUNT="$2"
+            shift 2
+            ;;
+        -c|--container)
+            CONTAINER="$2"
+            shift 2
+            ;;
+        -s|--state-file)
+            STATE_BLOB="$2"
+            shift 2
+            ;;
+        -t|--tag)
+            ENVIRONMENT_TAG="$2"
+            shift 2
+            ;;
+        -r|--resource-group)
+            RESOURCE_GROUP="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            usage
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$STORAGE_ACCOUNT" ] || [ -z "$CONTAINER" ]; then
+    echo -e "${RED}ERROR: Storage account and container are required${NC}"
+    echo ""
+    usage
+fi
+
+# Set default state file path if not provided
+if [ -z "$STATE_BLOB" ]; then
+    STATE_BLOB="terraform.tfstate"
+    echo -e "${YELLOW}No state file specified, using default: terraform.tfstate${NC}"
+fi
+
+echo ""
 echo -e "${YELLOW}Configuration:${NC}"
 echo "  Storage Account: $STORAGE_ACCOUNT"
 echo "  Container: $CONTAINER"
-echo "  State File: $OLD_STATE_BLOB"
-echo "  Environment Tag: $ENVIRONMENT_TAG"
+echo "  State File: $STATE_BLOB"
+echo "  State Resource Group: $RESOURCE_GROUP"
+if [ ! -z "$ENVIRONMENT_TAG" ]; then
+    echo "  Environment Tag: $ENVIRONMENT_TAG"
+fi
 echo ""
 
 # Confirmation
@@ -79,11 +146,12 @@ if [ -f "terraform.tfstate" ]; then
     mv terraform.tfstate terraform.tfstate.backup.$(date +%Y%m%d_%H%M%S)
 fi
 
-# Download the old state file
+# Download the state file
+echo -e "${YELLOW}Downloading state file: $STATE_BLOB${NC}"
 az storage blob download \
     --account-name "$STORAGE_ACCOUNT" \
     --container-name "$CONTAINER" \
-    --name "$OLD_STATE_BLOB" \
+    --name "$STATE_BLOB" \
     --file "terraform.tfstate" \
     --account-key "$ACCOUNT_KEY"
 
@@ -128,6 +196,20 @@ echo ""
 
 # Step 3: Create terraform.tfvars
 echo -e "${YELLOW}Step 3: Creating terraform.tfvars...${NC}"
+
+# Try to extract environment tag from state blob path if not provided
+if [ -z "$ENVIRONMENT_TAG" ]; then
+    # Try pattern: azure/env/TAG/terraform.tfstate
+    ENVIRONMENT_TAG=$(echo "$STATE_BLOB" | grep -oP 'azure/[^/]+/\K[^/]+(?=/terraform.tfstate)' || echo "")
+    if [ -z "$ENVIRONMENT_TAG" ]; then
+        # Fallback: use container name
+        ENVIRONMENT_TAG="$CONTAINER"
+        echo -e "${YELLOW}Could not extract environment tag from state path, using container name${NC}"
+    else
+        echo -e "${YELLOW}Extracted environment tag from state path: $ENVIRONMENT_TAG${NC}"
+    fi
+fi
+
 cat > terraform.tfvars <<EOF
 location     = "uksouth"
 project_name = "testcontainers"
@@ -283,9 +365,18 @@ fi
 # Step 8: Check for soft-deleted Key Vaults
 echo ""
 echo -e "${YELLOW}Step 8: Checking for soft-deleted Key Vaults...${NC}"
-DELETED_KVS=$(az keyvault list-deleted \
-    --query "[?tags.EnvironmentTag=='$ENVIRONMENT_TAG'].name" \
-    -o tsv)
+
+if [ ! -z "$ENVIRONMENT_TAG" ]; then
+    DELETED_KVS=$(az keyvault list-deleted \
+        --query "[?tags.EnvironmentTag=='$ENVIRONMENT_TAG'].name" \
+        -o tsv 2>/dev/null)
+else
+    # List all soft-deleted vaults if no tag specified
+    DELETED_KVS=$(az keyvault list-deleted \
+        --query "[].name" \
+        -o tsv 2>/dev/null)
+    echo -e "${YELLOW}No environment tag specified, showing all soft-deleted vaults${NC}"
+fi
 
 if [ ! -z "$DELETED_KVS" ]; then
     echo -e "${YELLOW}Found soft-deleted Key Vaults:${NC}"
@@ -328,8 +419,12 @@ echo ""
 echo -e "${YELLOW}Summary:${NC}"
 echo "  - Infrastructure destroyed"
 echo "  - Local state files cleaned up"
-echo "  - Resource group: $RG_NAME"
-echo "  - Environment Tag: $ENVIRONMENT_TAG"
+echo "  - Storage Account: $STORAGE_ACCOUNT"
+echo "  - Container: $CONTAINER"
+echo "  - State File: $STATE_BLOB"
+if [ ! -z "$ENVIRONMENT_TAG" ]; then
+    echo "  - Environment Tag: $ENVIRONMENT_TAG"
+fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "  1. Verify all resources are deleted in Azure Portal"

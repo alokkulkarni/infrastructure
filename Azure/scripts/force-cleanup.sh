@@ -16,13 +16,84 @@ echo -e "${YELLOW}  Force Infrastructure Cleanup (Azure CLI)${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo ""
 
-# Configuration
-RG_NAME="testcontainers-dev-rg"
-ENVIRONMENT_TAG="SIT-Alok-TeamA-20251125-0921"
+# Parse command line arguments
+RESOURCE_GROUP=""
+ENVIRONMENT_TAG=""
+STORAGE_ACCOUNT=""
+CONTAINER=""
+STATE_BLOB=""
 
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -g, --resource-group NAME  Azure Resource Group to delete (required)"
+    echo "  -t, --tag TAG              Environment tag (optional, for Key Vault cleanup)"
+    echo "  -a, --account NAME         Storage Account name (optional, for state cleanup)"
+    echo "  -c, --container NAME       Storage Container name (optional, for state cleanup)"
+    echo "  -s, --state-file PATH      State file blob path (optional, for state cleanup)"
+    echo "  -h, --help                 Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  # Basic cleanup - just delete resource group"
+    echo "  $0 -g testcontainers-dev-rg"
+    echo ""
+    echo "  # Full cleanup - delete resources and state file"
+    echo "  $0 -g testcontainers-dev-rg -t SIT-Team-20251125 -a tctfstate2745ace7 -c dev-container -s terraform.tfstate"
+    exit 1
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -g|--resource-group)
+            RESOURCE_GROUP="$2"
+            shift 2
+            ;;
+        -t|--tag)
+            ENVIRONMENT_TAG="$2"
+            shift 2
+            ;;
+        -a|--account)
+            STORAGE_ACCOUNT="$2"
+            shift 2
+            ;;
+        -c|--container)
+            CONTAINER="$2"
+            shift 2
+            ;;
+        -s|--state-file)
+            STATE_BLOB="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            usage
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$RESOURCE_GROUP" ]; then
+    echo -e "${RED}ERROR: Resource group is required${NC}"
+    echo ""
+    usage
+fi
+
+echo ""
 echo -e "${YELLOW}Configuration:${NC}"
-echo "  Resource Group: $RG_NAME"
-echo "  Environment Tag: $ENVIRONMENT_TAG"
+echo "  Resource Group: $RESOURCE_GROUP"
+if [ ! -z "$ENVIRONMENT_TAG" ]; then
+    echo "  Environment Tag: $ENVIRONMENT_TAG"
+fi
+if [ ! -z "$STORAGE_ACCOUNT" ]; then
+    echo "  Storage Account: $STORAGE_ACCOUNT"
+    echo "  Container: $CONTAINER"
+    echo "  State File: $STATE_BLOB"
+fi
 echo ""
 
 # Confirmation
@@ -38,15 +109,35 @@ fi
 
 echo ""
 echo -e "${YELLOW}Step 1: Checking if resource group exists...${NC}"
-if ! az group show --name "$RG_NAME" &>/dev/null; then
+if ! az group show --name "$RESOURCE_GROUP" &>/dev/null; then
     echo -e "${GREEN}✅ Resource group does not exist - nothing to clean up${NC}"
+    
+    # Still check for soft-deleted Key Vaults
+    if [ ! -z "$ENVIRONMENT_TAG" ]; then
+        echo ""
+        echo -e "${YELLOW}Checking for soft-deleted Key Vaults with tag: $ENVIRONMENT_TAG${NC}"
+        DELETED_KVS=$(az keyvault list-deleted --query "[?tags.EnvironmentTag=='$ENVIRONMENT_TAG'].name" -o tsv 2>/dev/null)
+        if [ ! -z "$DELETED_KVS" ]; then
+            echo -e "${YELLOW}Found soft-deleted Key Vaults:${NC}"
+            echo "$DELETED_KVS"
+            echo ""
+            read -p "Purge soft-deleted Key Vaults? (yes/no): " PURGE_KV
+            if [ "$PURGE_KV" == "yes" ]; then
+                for kv in $DELETED_KVS; do
+                    echo -e "${YELLOW}Purging Key Vault: $kv${NC}"
+                    az keyvault purge --name "$kv" --no-wait 2>/dev/null || echo "Could not purge $kv"
+                done
+                echo -e "${GREEN}✅ Key Vault purge initiated${NC}"
+            fi
+        fi
+    fi
     exit 0
 fi
 
 echo -e "${YELLOW}Resource group exists. Listing resources...${NC}"
-az resource list --resource-group "$RG_NAME" --query "[].{Name:name, Type:type}" -o table
+az resource list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name, Type:type}" -o table
 
-RESOURCE_COUNT=$(az resource list --resource-group "$RG_NAME" --query "length([])" -o tsv)
+RESOURCE_COUNT=$(az resource list --resource-group "$RESOURCE_GROUP" --query "length([])" -o tsv)
 echo ""
 echo -e "${YELLOW}Found $RESOURCE_COUNT resources${NC}"
 echo ""
@@ -90,23 +181,28 @@ if [ "$FINAL_CONFIRM" != "yes" ]; then
     exit 0
 fi
 
-echo -e "${YELLOW}Deleting resource group: $RG_NAME${NC}"
-az group delete --name "$RG_NAME" --yes --no-wait
+echo -e "${YELLOW}Deleting resource group: $RESOURCE_GROUP${NC}"
+az group delete --name "$RESOURCE_GROUP" --yes --no-wait
 
 echo ""
 echo -e "${GREEN}✅ Resource group deletion initiated${NC}"
 echo ""
 echo -e "${YELLOW}Note: Deletion is running in the background. Check status with:${NC}"
-echo -e "  az group show --name $RG_NAME"
+echo -e "  az group show --name $RESOURCE_GROUP"
 echo ""
 
 echo -e "${YELLOW}Step 5: Checking for soft-deleted Key Vaults...${NC}"
 sleep 5  # Give it a moment for soft-delete to register
 
-DELETED_KVS=$(az keyvault list-deleted --query "[?tags.EnvironmentTag=='$ENVIRONMENT_TAG'].name" -o tsv 2>/dev/null)
-if [ -z "$DELETED_KVS" ]; then
-    # Try without tag filter
-    DELETED_KVS=$(az keyvault list-deleted --query "[?properties.vaultId && contains(properties.vaultId, '$RG_NAME')].name" -o tsv 2>/dev/null)
+if [ ! -z "$ENVIRONMENT_TAG" ]; then
+    DELETED_KVS=$(az keyvault list-deleted --query "[?tags.EnvironmentTag=='$ENVIRONMENT_TAG'].name" -o tsv 2>/dev/null)
+    if [ -z "$DELETED_KVS" ]; then
+        # Try without tag filter, using resource group
+        DELETED_KVS=$(az keyvault list-deleted --query "[?properties.vaultId && contains(properties.vaultId, '$RESOURCE_GROUP')].name" -o tsv 2>/dev/null)
+    fi
+else
+    # No tag specified, try to find by resource group only
+    DELETED_KVS=$(az keyvault list-deleted --query "[?properties.vaultId && contains(properties.vaultId, '$RESOURCE_GROUP')].name" -o tsv 2>/dev/null)
 fi
 
 if [ ! -z "$DELETED_KVS" ]; then
@@ -131,15 +227,44 @@ echo -e "${GREEN}  Force Cleanup Completed${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${YELLOW}Summary:${NC}"
-echo "  - Resource group deletion initiated: $RG_NAME"
+echo "  - Resource group deletion initiated: $RESOURCE_GROUP"
 echo "  - Key Vaults processed"
 echo "  - VMs deleted"
 echo ""
 echo -e "${YELLOW}Verification (run after a few minutes):${NC}"
-echo "  az group show --name $RG_NAME"
+echo "  az group show --name $RESOURCE_GROUP"
 echo "  (Should return 'ResourceGroupNotFound' when complete)"
 echo ""
-echo -e "${YELLOW}If using Terraform, clean up the local state:${NC}"
+
+# Cleanup state file if storage info provided
+if [ ! -z "$STORAGE_ACCOUNT" ] && [ ! -z "$CONTAINER" ] && [ ! -z "$STATE_BLOB" ]; then
+    echo -e "${YELLOW}Step 6: Cleaning up state file...${NC}"
+    echo ""
+    read -p "Delete state file from storage? (yes/no): " DELETE_STATE
+    if [ "$DELETE_STATE" == "yes" ]; then
+        echo -e "${YELLOW}Deleting state file: $STATE_BLOB${NC}"
+        ACCOUNT_KEY=$(az storage account keys list \
+            --account-name "$STORAGE_ACCOUNT" \
+            --resource-group "testcontainers-tfstate-rg" \
+            --query "[0].value" \
+            -o tsv 2>/dev/null)
+        
+        if [ ! -z "$ACCOUNT_KEY" ]; then
+            az storage blob delete \
+                --account-name "$STORAGE_ACCOUNT" \
+                --container-name "$CONTAINER" \
+                --name "$STATE_BLOB" \
+                --account-key "$ACCOUNT_KEY" 2>/dev/null && \
+                echo -e "${GREEN}✅ State file deleted${NC}" || \
+                echo -e "${YELLOW}Could not delete state file${NC}"
+        else
+            echo -e "${YELLOW}Could not retrieve storage account key${NC}"
+        fi
+    fi
+    echo ""
+fi
+
+echo -e "${YELLOW}Local cleanup (if you used Terraform):${NC}"
 echo "  cd ../terraform"
 echo "  rm -f terraform.tfstate terraform.tfstate.backup"
 echo "  rm -f backend.tf.backup.*"
