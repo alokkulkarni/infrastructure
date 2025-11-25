@@ -60,8 +60,16 @@ jobs:
           # Use shortened name to stay within 24 char limit: "tctfstate" (9) + 8 chars = 17 chars
           BACKEND_SA="tctfstate${SUBSCRIPTION_SHORT}"
           
+          # Container name based on environment tag for isolation (same logic as deploy)
+          CONTAINER_NAME=$(echo "${{ env.ENVIRONMENT_TAG }}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+          
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
+          echo "backend_container=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
+          echo "Backend configuration:"
+          echo "  Resource Group: ${BACKEND_RG}"
+          echo "  Storage Account: ${BACKEND_SA} (${#BACKEND_SA} chars)"
+          echo "  Container: ${CONTAINER_NAME}"
 
   validate-destroy:
     name: Validate Destroy Request
@@ -109,7 +117,7 @@ jobs:
             backend "azurerm" {
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
-              container_name       = "tfstate"
+              container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
               key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
             }
           }
