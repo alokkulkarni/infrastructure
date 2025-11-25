@@ -345,6 +345,21 @@ jobs:
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
 
+      - name: Auto-import existing resources (Idempotency)
+        working-directory: Azure/terraform
+        env:
+          ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
+          TF_VAR_project_name: testcontainers
+          TF_VAR_environment: ${{ github.event.inputs.environment }}
+          TF_VAR_location: ${{ github.event.inputs.location }}
+        run: |
+          echo "🔄 Checking for existing resources to import..."
+          ../scripts/auto-import-resources.sh || {
+            echo "⚠️  Auto-import encountered issues but continuing..."
+            echo "This might happen if some resources don't exist yet (normal for first run)"
+          }
+
       - name: Download plan
         uses: actions/download-artifact@v4
         with:
