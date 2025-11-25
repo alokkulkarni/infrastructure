@@ -94,13 +94,20 @@ RESOURCE_GROUP_NAME="${PROJECT_NAME}-tfstate-rg"
 # Shorten to "tctfstate" (9 chars) + 8 char subscription = 17 chars total (within 24 limit)
 STORAGE_ACCOUNT_NAME="tctfstate${SUBSCRIPTION_SHORT}"
 
+# Validate storage account name length (Azure limit is 24 characters)
+if [ ${#STORAGE_ACCOUNT_NAME} -gt 24 ]; then
+    echo -e "${RED}ERROR: Storage account name too long: ${STORAGE_ACCOUNT_NAME} (${#STORAGE_ACCOUNT_NAME} chars)${NC}"
+    echo -e "${RED}Azure storage account names must be 24 characters or less${NC}"
+    exit 1
+fi
+
 # Container name based on environment tag for isolation
 # Convert environment tag to lowercase and replace invalid chars
 CONTAINER_NAME=$(echo "$ENVIRONMENT_TAG" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
 
 echo -e "${YELLOW}Configuration:${NC}"
 echo "  Resource Group: $RESOURCE_GROUP_NAME"
-echo "  Storage Account: $STORAGE_ACCOUNT_NAME (shared)"
+echo "  Storage Account: $STORAGE_ACCOUNT_NAME (shared - ${#STORAGE_ACCOUNT_NAME} chars)"
 echo "  Container: $CONTAINER_NAME (unique per environment tag)"
 echo "  Environment Tag: $ENVIRONMENT_TAG"
 echo "  Location: $AZURE_LOCATION"

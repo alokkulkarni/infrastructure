@@ -57,7 +57,8 @@ jobs:
           PROJECT_NAME="testcontainers"
           
           BACKEND_RG="${PROJECT_NAME}-tfstate-rg"
-          BACKEND_SA="${PROJECT_NAME}tfstate${SUBSCRIPTION_SHORT}"
+          # Use shortened name to stay within 24 char limit: "tctfstate" (9) + 8 chars = 17 chars
+          BACKEND_SA="tctfstate${SUBSCRIPTION_SHORT}"
           
           echo "backend_resource_group=${BACKEND_RG}" >> $GITHUB_OUTPUT
           echo "backend_storage_account=${BACKEND_SA}" >> $GITHUB_OUTPUT
