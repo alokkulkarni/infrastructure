@@ -189,7 +189,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
-              key                  = "terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               use_oidc             = true
             }
           }
@@ -319,7 +319,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
-              key                  = "terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               use_oidc             = true
             }
           }
@@ -520,7 +520,7 @@ jobs:
               resource_group_name  = "${{ needs.setup-backend.outputs.backend_resource_group }}"
               storage_account_name = "${{ needs.setup-backend.outputs.backend_storage_account }}"
               container_name       = "${{ needs.setup-backend.outputs.backend_container }}"
-              key                  = "terraform.tfstate"
+              key                  = "azure/${{ env.ENVIRONMENT }}/${{ env.ENVIRONMENT_TAG }}/terraform.tfstate"
               use_oidc             = true
             }
           }
